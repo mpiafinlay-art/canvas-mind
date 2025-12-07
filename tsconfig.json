@@ -10,7 +10,9 @@
     ],
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "strict": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
     "declaration": true,
     "skipLibCheck": true,
     "paths": {

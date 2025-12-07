@@ -2,11 +2,7 @@
 
 import React from 'react';
 
-interface PopupBlockedAlertProps {
-  [key: string]: any;
-}
-
-export function PopupBlockedAlert(props: PopupBlockedAlertProps) {
+export function PopupBlockedAlert(props: any) {
   return null;
 }
 

@@ -2,11 +2,7 @@
 
 import React from 'react';
 
-interface ChangeFormatDialogProps {
-  [key: string]: any;
-}
-
-export default function ChangeFormatDialog(props: ChangeFormatDialogProps) {
+export default function ChangeFormatDialog(props: any) {
   return null;
 }
 

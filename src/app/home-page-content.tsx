@@ -26,8 +26,7 @@ import { Clapperboard, Loader2, User as UserIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { signInWithGoogle, signInAsGuest, signInWithEmail, createUserWithEmail, signOut } from '@/firebase/auth';
 import { Button } from '@/components/ui/button';
-import EmailAuthDialog from '@/components/auth/email-auth-dialog';
-import { PopupBlockedAlert } from '@/components/auth/popup-blocked-alert';
+import LoginDialog from '@/components/auth/login-dialog';
 
 // Helper function to ensure user document exists in Firestore
 const ensureUserDocument = async (firestore: Firestore, userToEnsure: User) => {
@@ -108,11 +107,9 @@ export default function HomePageContent() {
   
   // Estados mínimos necesarios
   const [isMounted, setIsMounted] = useState(false);
-  const [emailAuthDialogOpen, setEmailAuthDialogOpen] = useState(false);
-  const [emailAuthMode, setEmailAuthMode] = useState<'login' | 'signup'>('login');
-  const [showLogin, setShowLogin] = useState(true); // SIEMPRE mostrar login por defecto
-  const [isLoggingIn, setIsLoggingIn] = useState(false); // Estado para prevenir múltiples clics
-  const [showPopupBlockedAlert, setShowPopupBlockedAlert] = useState(false); // Alerta para pop-ups bloqueados
+  const [loginDialogOpen, setLoginDialogOpen] = useState(false);
+  const [showLogin, setShowLogin] = useState(false); // No mostrar login por defecto, solo botón
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   
   // REFS CRÍTICOS: Flags persistentes que NO causan re-renders
   const hasProcessedUserRef = useRef<string | null>(null);
@@ -741,7 +738,8 @@ export default function HomePageContent() {
       let errorMessage = 'No se pudo completar el proceso de login.';
       if (error.code === 'auth/popup-blocked') {
         errorMessage = 'El popup fue bloqueado por el navegador. Por favor, permite popups para este sitio.';
-        setShowPopupBlockedAlert(true); // Mostrar alerta persistente
+        // Popup bloqueado - mostrar mensaje en toast
+        toast({ variant: 'destructive', title: 'Popup bloqueado', description: 'Por favor permite popups para iniciar sesión con Google' });
       } else if (error.code === 'auth/popup-closed-by-user') {
         errorMessage = 'El popup fue cerrado antes de completar el login. Por favor, intenta de nuevo.';
       } else if (error.code === 'auth/redirect-cancelled-by-user') {
@@ -758,74 +756,7 @@ export default function HomePageContent() {
     }
   }, [auth, firestore, toast, isLoggingIn, setIsLoggingIn]);
 
-  const handleEmailAuth = useCallback(async (email: string, password: string) => {
-    if (!auth) {
-      throw new Error('Servicio de autenticación no disponible.');
-    }
-
-    try {
-      // CRÍTICO: Resetear flags ANTES de autenticación
-      hasProcessedUserRef.current = null;
-      isProcessingRef.current = false;
-      hasRedirectedRef.current = false;
-      redirectingToRef.current = null;
-      
-      let result: UserCredential;
-      
-      if (emailAuthMode === 'login') {
-        result = await signInWithEmail(auth, email, password);
-      } else {
-        result = await createUserWithEmail(auth, email, password);
-        toast({
-          title: '¡Cuenta creada!',
-          description: 'Tu cuenta ha sido creada exitosamente.',
-        });
-      }
-      
-      if (!result?.user) {
-        throw new Error('No se pudo obtener información del usuario después del login');
-      }
-      
-      // CRÍTICO: Marcar que el usuario acaba de hacer login explícitamente DESPUÉS del login exitoso
-      userJustLoggedInRef.current = true;
-      
-      // CRÍTICO: Guardar en sessionStorage para mantener el estado entre navegaciones
-      safeSessionStorage.setItem('hasRecentLogin', 'true');
-      safeSessionStorage.setItem('loginTimestamp', Date.now().toString());
-      safeSessionStorage.setItem('userJustLoggedIn', 'true');
-      
-      console.log('✅ Autenticación con email exitosa, asegurando documento de usuario...', { 
-        uid: result.user.uid,
-        email: result.user.email 
-      });
-      
-      // Asegurar documento de usuario
-      if (firestore && result.user) {
-        await ensureUserDocument(firestore, result.user);
-      }
-      
-      console.log('✅ Autenticación con email exitosa, procesando usuario...', { uid: result.user.uid });
-      // Procesar usuario inmediatamente después del login con email
-      if (firestore && result.user && processUserRef.current) {
-        // NO esperar al useEffect, procesar inmediatamente usando ref
-        processUserRef.current(result.user);
-      }
-    } catch (error: any) {
-      console.error('❌ Error en handleEmailAuth:', error);
-      // Resetear flags en caso de error
-      userJustLoggedInRef.current = false;
-      hasProcessedUserRef.current = null;
-      isProcessingRef.current = false;
-      hasRedirectedRef.current = false;
-      redirectingToRef.current = null;
-      toast({
-        variant: 'destructive',
-        title: 'Error de autenticación',
-        description: error.message || 'No se pudo completar la autenticación.',
-      });
-      throw error;
-    }
-  }, [auth, firestore, emailAuthMode, toast]); // CRÍTICO: Removido processUser de dependencias, usar processUserRef.current
+  // handleEmailAuth removido - ahora se maneja completamente en LoginDialog
 
   // RENDERIZADO: Lógica simple y directa
   // CRÍTICO: Verificar sessionStorage también para mostrar loading
@@ -856,172 +787,56 @@ export default function HomePageContent() {
     );
   }
 
-  // En TODOS los demás casos (sin login explícito, sin redirección, etc.), FORZAR mostrar login
+  // Si hay usuario, redirigir directamente al tablero
+  if (user && user.uid && !isUserLoading) {
+    // El useEffect ya maneja la redirección automática
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-slate-900 mx-auto" />
+          <p className="mt-4 text-lg font-semibold text-slate-900">Redirigiendo al tablero...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Si no hay usuario, mostrar página con botón de Login en esquina superior derecha
   return (
     <>
-      <div className="min-h-screen w-full flex flex-col items-center justify-center relative overflow-hidden font-sans text-slate-900" style={{ backgroundColor: '#96e4e6' }}>
-        {/* Fondo decorativo */}
-        <div className="absolute inset-0 z-0 opacity-[0.03]" 
-             style={{ 
-               backgroundImage: 'radial-gradient(#2c3e50 1px, transparent 1px)', 
-               backgroundSize: '20px 20px' 
-             }}>
+      <div className="min-h-screen w-full relative">
+        {/* Botón Login en esquina superior derecha */}
+        <div className="absolute top-4 right-4 z-50">
+          <Button
+            onClick={() => setLoginDialogOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg shadow-lg font-medium"
+          >
+            Login
+          </Button>
         </div>
 
-        <div className="z-10 w-full max-w-md px-6">
-          {/* Logo */}
-          <div className="flex flex-col items-center mb-10 text-center">
-            <div className="h-16 w-16 bg-black rounded-full flex items-center justify-center mb-4 shadow-lg">
-              <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                  <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#00ffaa" />
-                    <stop offset="50%" stopColor="#00d4ff" />
-                    <stop offset="100%" stopColor="#0066ff" />
-                  </linearGradient>
-                </defs>
-                {/* Forma ondulada interconectada - similar a la imagen */}
-                <path 
-                  d="M6 18C6 14, 8 12, 12 12C14 12, 16 13, 18 14C20 15, 22 16, 24 16C26 16, 28 15, 30 14C32 13, 34 14, 34 18C34 22, 32 24, 30 24C28 24, 26 23, 24 22C22 21, 20 20, 18 20C16 20, 14 21, 12 22C10 23, 8 22, 6 18Z" 
-                  fill="url(#logoGradient)"
-                />
-                <path 
-                  d="M8 16C8 14, 9 12, 12 12C13 12, 14 13, 16 14C18 15, 20 16, 22 16C23 16, 24 15, 26 14C27 13, 28 14, 28 16C28 18, 27 20, 26 20C25 20, 24 19, 22 18C20 17, 18 16, 16 16C14 16, 12 17, 10 18C9 19, 8 18, 8 16Z" 
-                  fill="url(#logoGradient)"
-                  opacity="0.85"
-                />
-                <path 
-                  d="M10 20C10 18, 11 16, 14 16C15 16, 16 17, 18 18C20 19, 22 20, 24 20C25 20, 26 19, 28 18C29 17, 30 18, 30 20C30 22, 29 24, 28 24C27 24, 26 23, 24 22C22 21, 20 20, 18 20C16 20, 14 21, 12 22C11 23, 10 22, 10 20Z" 
-                  fill="url(#logoGradient)"
-                  opacity="0.7"
-                />
-                <path 
-                  d="M12 14C12 12, 13 10, 16 10C17 10, 18 11, 20 12C22 13, 24 14, 26 14C27 14, 28 13, 30 12C31 11, 32 12, 32 14C32 16, 31 18, 30 18C29 18, 28 17, 26 16C24 15, 22 14, 20 14C18 14, 16 15, 14 16C13 17, 12 16, 12 14Z" 
-                  fill="url(#logoGradient)"
-                  opacity="0.6"
-                />
-              </svg>
-            </div>
-            <h1 className="text-4xl font-bold tracking-tight text-slate-900 mb-2">
-              Mi cerebro
+        {/* Contenido principal - puedes poner aquí el tablero o contenido que quieras mostrar */}
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
+          <div className="text-center">
+            <h1 className="text-4xl font-bold text-slate-900 mb-4">
+              Mi Cerebro
             </h1>
-            <p className="text-slate-500 text-lg">
-              Tu lienzo de ideas infinitas.
+            <p className="text-lg text-slate-600 mb-8">
+              Tu lienzo de ideas infinitas
             </p>
-          </div>
-
-          {/* Tarjeta Login */}
-          <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-100">
-            <div className="space-y-4">
-              {/* Botón Google */}
-              <Button
-                onClick={() => handleLogin('google')}
-                disabled={isLoggingIn}
-                size="lg"
-                className="w-full"
-              >
-                {isLoggingIn ? (
-                  <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                ) : (
-                  <img src="/google-logo.svg" alt="Google" width={20} height={20} className="mr-2 inline-block" />
-                )}
-                {isLoggingIn ? 'Iniciando sesión...' : 'Iniciar Sesión con Google'}
-              </Button>
-
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-slate-200" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-2 text-slate-400">O continúa como</span>
-                </div>
-              </div>
-
-              {/* Botón Invitado */}
-              <Button
-                onClick={() => handleLogin('guest')}
-                disabled={isLoggingIn}
-                size="lg"
-                variant="default"
-                className="w-full bg-[#16b5a8] hover:bg-[#139c91] text-white"
-              >
-                {isLoggingIn ? (
-                  <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                ) : (
-                  <UserIcon className="h-5 w-5 mr-2" />
-                )}
-                {isLoggingIn ? 'Iniciando sesión...' : 'Invitado'}
-              </Button>
-            </div>
-
-            {/* Links adicionales */}
-            <div className="mt-6 text-center space-x-2">
-              <button
-                onClick={() => {
-                  setEmailAuthMode('login');
-                  setEmailAuthDialogOpen(true);
-                }}
-                className="text-blue-600 italic hover:text-blue-700 underline text-sm"
-              >
-                Log in
-              </button>
-              <span className="text-blue-600 italic text-sm">/</span>
-              <button
-                onClick={() => {
-                  setEmailAuthMode('signup');
-                  setEmailAuthDialogOpen(true);
-                }}
-                className="text-blue-600 italic hover:text-blue-700 underline text-sm"
-              >
-                Crear Cuenta
-              </button>
-              {auth?.currentUser && (
-                <>
-                  <span className="text-blue-600 italic text-sm mx-2">/</span>
-                  <button
-                    onClick={async () => {
-                      try {
-                        await signOut(auth);
-                        safeSessionStorage.clear();
-                        hasProcessedUserRef.current = null;
-                        isProcessingRef.current = false;
-                        hasRedirectedRef.current = false;
-                        redirectingToRef.current = null;
-                        userJustLoggedInRef.current = false;
-                        setShowLogin(true);
-                        toast({
-                          title: 'Sesión cerrada',
-                          description: 'Has cerrado sesión correctamente.',
-                        });
-                      } catch (error) {
-                        console.error('Error al cerrar sesión:', error);
-                        toast({
-                          variant: 'destructive',
-                          title: 'Error',
-                          description: 'No se pudo cerrar la sesión.',
-                        });
-                      }
-                    }}
-                    className="text-red-600 italic hover:text-red-700 underline text-sm"
-                  >
-                    Cerrar Sesión
-                  </button>
-                </>
-              )}
-            </div>
+            <p className="text-sm text-slate-500">
+              Haz clic en Login para comenzar
+            </p>
           </div>
         </div>
       </div>
-      <EmailAuthDialog
-        isOpen={emailAuthDialogOpen}
-        onOpenChange={setEmailAuthDialogOpen}
-        mode={emailAuthMode}
-        onAuth={handleEmailAuth}
+
+      <LoginDialog
+        isOpen={loginDialogOpen}
+        onClose={() => setLoginDialogOpen(false)}
+        onSuccess={() => {
+          // El usuario será procesado automáticamente por el useEffect
+        }}
       />
-      
-      {showPopupBlockedAlert && (
-        <PopupBlockedAlert onDismiss={() => setShowPopupBlockedAlert(false)} />
-      )}
     </>
   );
 }

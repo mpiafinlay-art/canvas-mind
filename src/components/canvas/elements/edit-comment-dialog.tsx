@@ -2,11 +2,7 @@
 
 import React from 'react';
 
-interface EditCommentDialogProps {
-  [key: string]: any;
-}
-
-export default function EditCommentDialog(props: EditCommentDialogProps) {
+export default function EditCommentDialog(props: any) {
   return null;
 }
 

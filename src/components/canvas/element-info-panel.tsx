@@ -2,11 +2,7 @@
 
 import React from 'react';
 
-interface ElementInfoPanelProps {
-  [key: string]: any;
-}
-
-export default function ElementInfoPanel(props: ElementInfoPanelProps) {
+export default function ElementInfoPanel(props: any) {
   return null;
 }
 

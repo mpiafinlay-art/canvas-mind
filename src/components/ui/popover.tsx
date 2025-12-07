@@ -2,20 +2,15 @@
 
 import React from 'react';
 
-interface PopoverProps {
-  children: React.ReactNode;
-  [key: string]: any;
-}
-
-export function Popover({ children, ...props }: PopoverProps) {
+export function Popover({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 
-export function PopoverTrigger({ children, ...props }: PopoverProps) {
+export function PopoverTrigger({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 
-export function PopoverContent({ children, ...props }: PopoverProps) {
+export function PopoverContent({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 

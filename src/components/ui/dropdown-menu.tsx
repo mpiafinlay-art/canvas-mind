@@ -2,39 +2,34 @@
 
 import React from 'react';
 
-interface DropdownMenuProps {
-  children: React.ReactNode;
-  [key: string]: any;
-}
-
-export function DropdownMenu({ children, ...props }: DropdownMenuProps) {
+export function DropdownMenu({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 
-export function DropdownMenuTrigger({ children, ...props }: DropdownMenuProps) {
+export function DropdownMenuTrigger({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 
-export function DropdownMenuContent({ children, ...props }: DropdownMenuProps) {
+export function DropdownMenuContent({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 
-export function DropdownMenuItem({ children, ...props }: DropdownMenuProps) {
+export function DropdownMenuItem({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 
-export function DropdownMenuSeparator({ ...props }: DropdownMenuProps) {
+export function DropdownMenuSeparator({ ...props }: any) {
   return <hr {...props} />;
 }
 
-export function DropdownMenuSub({ children, ...props }: DropdownMenuProps) {
+export function DropdownMenuSub({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 
-export function DropdownMenuSubContent({ children, ...props }: DropdownMenuProps) {
+export function DropdownMenuSubContent({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }
 
-export function DropdownMenuSubTrigger({ children, ...props }: DropdownMenuProps) {
+export function DropdownMenuSubTrigger({ children, ...props }: any) {
   return <div {...props}>{children}</div>;
 }

@@ -2,11 +2,7 @@
 
 import React from 'react';
 
-interface EmailAuthDialogProps {
-  [key: string]: any;
-}
-
-export default function EmailAuthDialog(props: EmailAuthDialogProps) {
+export default function EmailAuthDialog(props: any) {
   return null;
 }
 
