@@ -14,7 +14,7 @@ interface UseElementManagerReturn {
       properties?: Partial<CanvasElementProperties>;
       position?: { x: number; y: number };
     }
-  ) => Promise<void>;
+  ) => Promise<string>;
 }
 
 export function useElementManager(
@@ -79,8 +79,9 @@ export function useElementManager(
         'canvasElements'
       );
 
-      await addDoc(elementsCollection, newElement);
-      console.log(`✅ Elemento ${type} agregado exitosamente`);
+      const docRef = await addDoc(elementsCollection, newElement);
+      console.log(`✅ Elemento ${type} agregado exitosamente con ID: ${docRef.id}`);
+      return docRef.id;
     } catch (error) {
       console.error('Error al agregar elemento:', error);
       throw error;

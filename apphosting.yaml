@@ -1,0 +1,24 @@
+# Settings for Backend (on Cloud Run).
+# See https://firebase.google.com/docs/app-hosting/configure#cloud-run
+runConfig:
+  minInstances: 1  # Cambiado a 1 para evitar cold starts en producción
+  maxInstances: 10
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+# Environment variables and secrets.
+# See https://firebase.google.com/docs/app-hosting/configure#user-defined-environment
+env:
+  # Firebase config se obtiene automáticamente del proyecto
+  # Si necesitas variables personalizadas, descomenta y configura:
+  # - variable: NEXT_PUBLIC_CUSTOM_VAR
+  #   value: your-value
+  #   availability:
+  #     - BUILD
+  #     - RUNTIME
+
+  # Para usar secrets de Cloud Secret Manager:
+  # - variable: API_KEY
+  #   secret: myApiKeySecret
+
