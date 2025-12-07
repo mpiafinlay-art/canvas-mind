@@ -180,7 +180,7 @@ export default function NotepadElement(props: CommonElementProps) {
 
   // Ref para almacenar el contenido anterior y evitar loops
   const prevPagesRef = useRef<string>('');
-  
+
   useEffect(() => {
     if (contentRef.current) {
       // Crear string estable para comparar
@@ -193,18 +193,18 @@ export default function NotepadElement(props: CommonElementProps) {
       
       prevPagesRef.current = pagesString;
       
-      const isFocused = document.activeElement === contentRef.current;
-      if (!isFocused) {
-        const pageContent = typedContent.pages?.[currentPageIndex] ?? '';
-        // Limpiar contenido vacío o con solo <div><br></div>
-        const cleanContent = pageContent === '<div><br></div>' || pageContent === '<div></div>' || pageContent.trim() === '' ? '' : pageContent;
-        // CRÍTICO: Solo actualizar si NO está enfocado (preservar cursor)
-        if (!isFocused && contentRef.current.innerHTML !== cleanContent) {
+        const isFocused = document.activeElement === contentRef.current;
+        if (!isFocused) {
+            const pageContent = typedContent.pages?.[currentPageIndex] ?? '';
+            // Limpiar contenido vacío o con solo <div><br></div>
+            const cleanContent = pageContent === '<div><br></div>' || pageContent === '<div></div>' || pageContent.trim() === '' ? '' : pageContent;
+            // CRÍTICO: Solo actualizar si NO está enfocado (preservar cursor)
+            if (!isFocused && contentRef.current.innerHTML !== cleanContent) {
           // Usar helper para preservar cursor si hay uno guardado
           const { updateInnerHTMLPreservingCursor } = require('@/lib/cursor-helper');
           updateInnerHTMLPreservingCursor(contentRef.current, cleanContent);
+            }
         }
-      }
     }
   }, [typedContent.pages, currentPageIndex]);
 
@@ -289,39 +289,39 @@ export default function NotepadElement(props: CommonElementProps) {
     // Esperar un momento adicional para asegurar que Firestore recibió el update
     await new Promise(resolve => setTimeout(resolve, 150));
     
-    const isMinimized = !!minimized;
-    const currentSize = (properties as CanvasElementProperties)?.size || { width: 794, height: 1021 };
-    
-    const currentSizeNumeric = {
-      width: typeof currentSize.width === 'number' ? currentSize.width : parseFloat(String(currentSize.width)) || 794,
-      height: typeof currentSize.height === 'number' ? currentSize.height : parseFloat(String(currentSize.height)) || 1021,
-    };
-
-    if (isMinimized) {
-      const { originalSize, ...restProps } = (properties || {}) as Partial<CanvasElementProperties>;
-      const restoredSize = originalSize || { width: 794, height: 1021 };
-      const newProperties: Partial<CanvasElementProperties> = { 
-        ...restProps, 
-        size: restoredSize 
-      };
+      const isMinimized = !!minimized;
+      const currentSize = (properties as CanvasElementProperties)?.size || { width: 794, height: 1021 };
       
-      onUpdate(id, {
-        minimized: false,
-        properties: newProperties,
+      const currentSizeNumeric = {
+        width: typeof currentSize.width === 'number' ? currentSize.width : parseFloat(String(currentSize.width)) || 794,
+        height: typeof currentSize.height === 'number' ? currentSize.height : parseFloat(String(currentSize.height)) || 1021,
+      };
+
+      if (isMinimized) {
+          const { originalSize, ...restProps } = (properties || {}) as Partial<CanvasElementProperties>;
+          const restoredSize = originalSize || { width: 794, height: 1021 };
+          const newProperties: Partial<CanvasElementProperties> = { 
+            ...restProps, 
+            size: restoredSize 
+          };
+          
+          onUpdate(id, {
+              minimized: false,
+              properties: newProperties,
         // CRÍTICO: No tocar el contenido al restaurar
-      });
-    } else {
-      const currentWidth = typeof currentSize.width === 'number' ? currentSize.width : parseFloat(String(currentSize.width)) || 794;
-      onUpdate(id, {
-        minimized: true,
-        properties: { 
-          ...properties, 
-          size: { width: currentWidth, height: 48 }, 
-          originalSize: currentSizeNumeric 
-        },
+          });
+      } else {
+          const currentWidth = typeof currentSize.width === 'number' ? currentSize.width : parseFloat(String(currentSize.width)) || 794;
+          onUpdate(id, {
+              minimized: true,
+              properties: { 
+                ...properties, 
+                size: { width: currentWidth, height: 48 }, 
+                originalSize: currentSizeNumeric 
+              },
         // CRÍTICO: No tocar el contenido al minimizar
-      });
-    }
+          });
+      }
   }, [isPreview, minimized, properties, onUpdate, id, saveContent]);
   
   const handleCloseNotepad = useCallback((e: React.MouseEvent) => { 

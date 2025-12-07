@@ -2,10 +2,10 @@
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
+import { Loader2, LogIn } from 'lucide-react';
 
 // Hooks y Contextos
-import { useAuth, useUser, useStorage } from '@/firebase/provider';
+import { useAuth, useUser, useStorage, useFirestore } from '@/firebase/provider';
 import { useBoardStore } from '@/lib/store/boardStore';
 import { useBoardState } from '@/hooks/use-board-state';
 import { useElementManager } from '@/hooks/use-element-manager';
@@ -16,6 +16,8 @@ import { useToast } from '@/hooks/use-toast';
 import { uploadFile } from '@/lib/upload-helper';
 import { WithId, CanvasElement, Board, ElementType, ElementContent, CanvasElementProperties } from '@/lib/types';
 import html2canvas from 'html2canvas';
+import { signInAsGuest } from '@/firebase/auth';
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 
 // Componentes de UI
 import { Button } from '@/components/ui/button';
@@ -30,6 +32,7 @@ import ChangeFormatDialog from '@/components/canvas/change-format-dialog';
 import EditCommentDialog from '@/components/canvas/elements/edit-comment-dialog';
 import ElementInfoPanel from '@/components/canvas/element-info-panel';
 import RenameBoardDialog from '@/components/canvas/rename-board-dialog';
+import LoginDialog from '@/components/auth/login-dialog';
 // Hook de dictado
 import { useDictation } from '@/hooks/use-dictation';
 
@@ -39,10 +42,33 @@ interface BoardPageProps {
   };
 }
 
+// Helper function to ensure user document exists in Firestore
+const ensureUserDocument = async (firestore: any, userToEnsure: any) => {
+  if (!firestore || !userToEnsure) return;
+  const userDocRef = doc(firestore, 'users', userToEnsure.uid);
+  try {
+    const userDoc = await getDoc(userDocRef);
+    if (!userDoc.exists()) {
+      await setDoc(userDocRef, {
+        uid: userToEnsure.uid,
+        email: userToEnsure.email || null,
+        displayName: userToEnsure.displayName || 'Invitado',
+        photoURL: userToEnsure.photoURL || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }
+  } catch (error) {
+    console.error('Error ensuring user document:', error);
+  }
+};
+
 export default function BoardPage({ params }: BoardPageProps) {
   const { boardId } = params;
   const router = useRouter();
   const { user, isUserLoading: authLoading, userError } = useUser();
+  const auth = useAuth();
+  const firestore = useFirestore();
   const storage = useStorage();
   const { toast } = useToast();
   const isMobile = useMediaQuery('(max-width: 768px)');
@@ -139,6 +165,7 @@ export default function BoardPage({ params }: BoardPageProps) {
   const [changeFormatDialogOpen, setChangeFormatDialogOpen] = useState(false);
   const [isPanningActive, setIsPanningActive] = useState(false);
   const [isRenameBoardDialogOpen, setIsRenameBoardDialogOpen] = useState(false);
+  const [isLoginDialogOpen, setIsLoginDialogOpen] = useState(false);
   
   // Estados de Selección y Edición
   const [selectedElement, setSelectedElement] = useState<WithId<CanvasElement> | null>(null);
@@ -303,6 +330,37 @@ export default function BoardPage({ params }: BoardPageProps) {
   const isLoadingRef = useRef(false);
   const waitTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentBoardIdRef = useRef<string | null>(null);
+  const hasTriedCreateUserRef = useRef(false);
+
+  // CRÍTICO: Crear usuario anónimo automáticamente si no hay usuario
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!auth || !firestore) return;
+    if (authLoading) return;
+    if (user) {
+      hasTriedCreateUserRef.current = false;
+      return;
+    }
+    if (hasTriedCreateUserRef.current) return;
+    
+    hasTriedCreateUserRef.current = true;
+    
+    const createAnonymousUser = async () => {
+      try {
+        console.log('🔄 [BoardPage] Creando usuario anónimo...');
+        const result = await signInAsGuest(auth);
+        if (result?.user) {
+          await ensureUserDocument(firestore, result.user);
+          console.log('✅ [BoardPage] Usuario anónimo creado:', result.user.uid);
+        }
+      } catch (error) {
+        console.error('❌ [BoardPage] Error creando usuario anónimo:', error);
+        hasTriedCreateUserRef.current = false;
+      }
+    };
+    
+    createAnonymousUser();
+  }, [user, authLoading, auth, firestore]);
 
   // CONSOLIDADO: Un solo useEffect para login y carga de tablero
   useEffect(() => {
@@ -331,7 +389,7 @@ export default function BoardPage({ params }: BoardPageProps) {
     }
     
     // Prevenir múltiples ejecuciones
-    if (isLoadingRef.current || authLoading) {
+    if (isLoadingRef.current) {
       console.log('⏸️ [BoardPage] Saltando ejecución (ya cargando o auth cargando)', {
         isLoading: isLoadingRef.current,
         authLoading
@@ -365,14 +423,10 @@ export default function BoardPage({ params }: BoardPageProps) {
       timeSinceLogin: loginTimestamp ? Date.now() - parseInt(loginTimestamp) : null
     });
     
-    // Redirigir si no hay usuario y no hay login reciente
+    // Si no hay usuario y no hay login reciente, esperar a que se cree el usuario anónimo
+    // El useEffect anterior se encargará de crear el usuario anónimo
     if (!user && !isLoginRecent) {
-      console.log('⚠️ [BoardPage] No hay usuario ni login reciente, redirigiendo a inicio...');
-      if (typeof window !== 'undefined') {
-        sessionStorage.clear();
-        localStorage.clear();
-        window.location.replace('/');
-      }
+      console.log('⏳ [BoardPage] Esperando creación de usuario anónimo...');
       return;
     }
     
@@ -391,13 +445,13 @@ export default function BoardPage({ params }: BoardPageProps) {
       });
       waitTimerRef.current = setTimeout(() => {
         if (!user && typeof window !== 'undefined') {
-          console.log('⚠️ [BoardPage] Timeout: Usuario no disponible después de esperar, redirigiendo...');
+          console.log('⚠️ [BoardPage] Timeout: Usuario no disponible después de esperar - mostrando botón de login');
           // CRÍTICO: No limpiar sessionStorage completamente - puede haber información útil
           // Solo limpiar flags de login, mantener anonymousUserId si existe
           sessionStorage.removeItem('hasRecentLogin');
           sessionStorage.removeItem('loginTimestamp');
           sessionStorage.removeItem('redirectingToBoard');
-          window.location.replace('/');
+          // NO redirigir - permitir que se muestre el botón de login
         }
       }, waitTime);
       return;
@@ -775,44 +829,64 @@ export default function BoardPage({ params }: BoardPageProps) {
     );
   }
 
-  // Si no hay usuario después de cargar, verificar login reciente antes de redirigir
+  // Si no hay usuario después de cargar, verificar login reciente
+  // Verificar si hay login reciente (para usuarios anónimos después de redirect)
+  const hasRecentLogin = typeof window !== 'undefined' ? sessionStorage.getItem('hasRecentLogin') === 'true' : false;
+  const loginTimestamp = typeof window !== 'undefined' ? sessionStorage.getItem('loginTimestamp') : null;
+  const redirectingToBoard = typeof window !== 'undefined' ? sessionStorage.getItem('redirectingToBoard') : null;
+  const isLoginRecent = hasRecentLogin && loginTimestamp && (Date.now() - parseInt(loginTimestamp)) < 60000;
+  
   if (!user) {
-    // Verificar si hay login reciente (para usuarios anónimos después de redirect)
-    if (typeof window !== 'undefined') {
-      const hasRecentLogin = sessionStorage.getItem('hasRecentLogin') === 'true';
-      const loginTimestamp = sessionStorage.getItem('loginTimestamp');
-      const redirectingToBoard = sessionStorage.getItem('redirectingToBoard');
-      const isLoginRecent = hasRecentLogin && loginTimestamp && (Date.now() - parseInt(loginTimestamp)) < 60000;
-      
-      if (isLoginRecent) {
-        // Mostrar loading mientras esperamos que Firebase Auth restaure el usuario anónimo
-        console.log('⏳ [BoardPage] Render: Login reciente detectado, esperando usuario...', {
-          hasRecentLogin,
-          loginTimestamp,
-          redirectingToBoard,
-          boardId
-        });
-        return (
-          <div className="flex h-screen w-full flex-col items-center justify-center" style={{ backgroundColor: '#96e4e6' }}>
-            <Loader2 className="h-8 w-8 animate-spin text-slate-900" />
-            <p className="mt-4 text-lg font-semibold text-slate-900">Cargando tu tablero...</p>
-          </div>
-        );
-      }
+    if (isLoginRecent) {
+      // Mostrar loading mientras esperamos que Firebase Auth restaure el usuario anónimo
+      console.log('⏳ [BoardPage] Render: Login reciente detectado, esperando usuario...', {
+        hasRecentLogin,
+        loginTimestamp,
+        redirectingToBoard,
+        boardId
+      });
+      return (
+        <div className="flex h-screen w-full flex-col items-center justify-center" style={{ backgroundColor: '#96e4e6' }}>
+          <Loader2 className="h-8 w-8 animate-spin text-slate-900" />
+          <p className="mt-4 text-lg font-semibold text-slate-900">Cargando tu tablero...</p>
+        </div>
+      );
     }
     
-    // Si no hay login reciente, redirigir
-    console.log('⚠️ [BoardPage] Render: No hay usuario y no hay login reciente, redirigiendo...');
-    if (typeof window !== 'undefined') {
-      sessionStorage.clear();
-      localStorage.clear();
-      window.location.replace('/');
-    }
+    // Si no hay usuario y no hay login reciente, mostrar loading mientras se crea usuario anónimo
+    // O mostrar botón de login si el usuario quiere iniciar sesión explícitamente
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center" style={{ backgroundColor: '#cae3e1' }}>
-        <Loader2 className="h-8 w-8 animate-spin text-slate-900" />
-        <p className="mt-4 text-lg font-semibold text-slate-900">Redirigiendo...</p>
-      </div>
+        <div className="h-screen w-screen relative bg-[#3b3b3b] overflow-hidden">
+          {/* Botón de Login en esquina superior derecha */}
+          <div className="absolute top-4 right-4 z-50">
+            <Button
+              onClick={() => setIsLoginDialogOpen(true)}
+              className="bg-white text-slate-900 hover:bg-gray-100 flex items-center gap-2"
+            >
+              <LogIn className="h-4 w-4" />
+              <span>Iniciar Sesión</span>
+            </Button>
+          </div>
+          
+          {/* Mensaje central con loading */}
+          <div className="flex h-screen w-full flex-col items-center justify-center">
+            <div className="text-center space-y-4">
+              <Loader2 className="h-8 w-8 animate-spin text-white mx-auto" />
+              <h1 className="text-3xl font-bold text-white">Preparando tu espacio...</h1>
+              <p className="text-lg text-gray-300">Puedes iniciar sesión para guardar tus tableros</p>
+            </div>
+          </div>
+          
+          {/* LoginDialog */}
+          <LoginDialog
+            isOpen={isLoginDialogOpen}
+            onClose={() => setIsLoginDialogOpen(false)}
+            onSuccess={() => {
+              setIsLoginDialogOpen(false);
+              // El useEffect detectará el cambio de usuario y cargará el tablero automáticamente
+            }}
+          />
+        </div>
     );
   }
 
@@ -951,7 +1025,7 @@ export default function BoardPage({ params }: BoardPageProps) {
               content: { url }, 
               properties: { size: { width: 300, height: 200 } } 
             });
-          setIsImageUrlDialogOpen(false);
+            setIsImageUrlDialogOpen(false);
             toast({ title: 'Imagen agregada', description: 'La imagen se ha agregado al lienzo' });
           } catch (error) {
             toast({ 
@@ -980,6 +1054,30 @@ export default function BoardPage({ params }: BoardPageProps) {
         element={selectedElement}
         isVisible={isInfoPanelVisible && !!selectedElement}
         onClose={() => setIsInfoPanelVisible(false)}
+      />
+      
+      {/* Botón de Login en esquina superior derecha cuando hay usuario (para cambiar de cuenta) */}
+      {user && (
+        <div className="absolute top-4 right-4 z-50">
+          <Button
+            onClick={() => setIsLoginDialogOpen(true)}
+            variant="outline"
+            className="bg-white/10 text-white border-white/20 hover:bg-white/20 flex items-center gap-2"
+          >
+            <LogIn className="h-4 w-4" />
+            <span>{user.isAnonymous ? 'Iniciar Sesión' : 'Cambiar Cuenta'}</span>
+          </Button>
+        </div>
+      )}
+      
+      {/* LoginDialog - disponible siempre */}
+      <LoginDialog
+        isOpen={isLoginDialogOpen}
+        onClose={() => setIsLoginDialogOpen(false)}
+        onSuccess={() => {
+          setIsLoginDialogOpen(false);
+          // El useEffect detectará el cambio de usuario y cargará el tablero automáticamente
+        }}
       />
       </div>
     </>

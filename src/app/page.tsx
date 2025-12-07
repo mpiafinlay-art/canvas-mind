@@ -1,7 +1,15 @@
 "use client";
 
-import HomePageContent from "./home-page-content";
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function HomePage() {
-  return <HomePageContent />;
+  const router = useRouter();
+  
+  useEffect(() => {
+    // Redirigir directamente a /board/new para que los usuarios inicien en tableros
+    router.replace('/board/new');
+  }, [router]);
+  
+  return null;
 }

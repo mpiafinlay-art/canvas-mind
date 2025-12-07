@@ -2,12 +2,9 @@
 
 import React from 'react';
 
-interface FormattingToolbarProps {
-  [key: string]: any;
-}
-
-export default function FormattingToolbar(props: FormattingToolbarProps) {
-  return (
+// Aceptar cualquier prop para evitar errores de tipo
+export default function FormattingToolbar(props: any) {
+        return (
     <div className="formatting-toolbar">
       {/* Formatting toolbar implementation placeholder */}
     </div>

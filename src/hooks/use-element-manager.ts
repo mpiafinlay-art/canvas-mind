@@ -25,7 +25,7 @@ export function useElementManager(
   const firestore = useFirestore();
   const { user } = useUser();
   const { board, updateElement } = useBoardStore();
-  
+
   const getViewportCenterRef = useRef(getViewportCenter);
   const getNextZIndexRef = useRef(getNextZIndex);
 
@@ -46,13 +46,13 @@ export function useElementManager(
       console.error('No se puede agregar elemento: falta firestore, user o board');
       return;
     }
-
+    
     try {
       const userId = board.userId || (board as { ownerId?: string }).ownerId;
       if (!userId) {
         console.error('No se pudo obtener userId para agregar elemento');
-        return;
-      }
+      return;
+    }
 
       const center = options?.position || getViewportCenterRef.current();
       const zIndex = getNextZIndexRef.current();
