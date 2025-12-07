@@ -1,122 +1,188 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useFirestore, useUser } from '@/firebase/provider';
-import { collection, query, getDocs, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
-import { WithId, Board, CanvasElement } from '@/lib/types';
-import { serverTimestamp } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, orderBy, writeBatch, deleteDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import type { WithId, CanvasBoard, CanvasElement } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
 
-interface UseBoardStateReturn {
-  boards: WithId<Board>[];
-  handleRenameBoard: (newName: string) => Promise<void>;
-  handleDeleteBoard: () => Promise<void>;
-  clearCanvas: (elements: WithId<CanvasElement>[]) => Promise<void>;
-}
-
-export function useBoardState(boardId: string): UseBoardStateReturn {
+export function useBoardState(boardId: string) {
   const firestore = useFirestore();
   const { user } = useUser();
-  const [boards, setBoards] = useState<WithId<Board>[]>([]);
+  const { toast } = useToast();
+  const router = useRouter();
+  
+  // CRÍTICO: Usar refs para router y toast para evitar re-suscripciones infinitas
+  // Estos objetos cambian frecuentemente y NO deben estar en dependencias de useEffect
+  const routerRef = useRef(router);
+  const toastRef = useRef(toast);
+  
+  // Actualizar refs cuando cambian
+  useEffect(() => {
+    routerRef.current = router;
+    toastRef.current = toast;
+  }, [router, toast]);
 
-  // Cargar boards del usuario
+  const [board, setBoard] = useState<WithId<CanvasBoard> | null>(null);
+  const [boards, setBoards] = useState<WithId<CanvasBoard>[]>([]);
+  const [elements, setElements] = useState<WithId<CanvasElement>[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch all boards for the user
   useEffect(() => {
     if (!firestore || !user) return;
-
-    const loadBoards = async () => {
-      try {
-        const userId = user.uid;
-        const boardsCollection = collection(firestore, 'users', userId, 'canvasBoards');
-        const boardsQuery = query(boardsCollection);
-        const boardsSnapshot = await getDocs(boardsQuery);
-        
-        const boardsData = boardsSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-        } as WithId<Board>));
-        
-        setBoards(boardsData);
-      } catch (error) {
-        console.error('Error al cargar boards:', error);
-      }
-    };
-
-    loadBoards();
+    const boardsQuery = query(
+      collection(firestore, 'users', user.uid, 'canvasBoards'),
+      orderBy('updatedAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(boardsQuery, (snapshot) => {
+      const boardsData = snapshot.docs.map((doc) => ({
+        ...(doc.data() as CanvasBoard),
+        id: doc.id,
+      }));
+      setBoards(boardsData);
+    }, (error) => {
+      console.error('Error fetching boards list:', error);
+    });
+    return () => unsubscribe();
   }, [firestore, user]);
 
-  const handleRenameBoard = useCallback(async (newName: string) => {
+  // Subscribe to current board details
+  // CRÍTICO: NO crear listener de elements aquí - useBoardStore ya lo maneja
+  // Solo crear listener de board para obtener datos del tablero (nombre, etc.)
+  useEffect(() => {
     if (!firestore || !user || !boardId) return;
 
-    try {
-      const userId = user.uid;
-      const boardRef = doc(firestore, 'users', userId, 'canvasBoards', boardId);
-      await updateDoc(boardRef, {
-        name: newName,
-        updatedAt: serverTimestamp(),
-      });
-      
-      // Actualizar estado local
-      setBoards(prev => prev.map(board => 
-        board.id === boardId ? { ...board, name: newName } : board
-      ));
-    } catch (error) {
-      console.error('Error al renombrar board:', error);
-      throw error;
-    }
-  }, [firestore, user, boardId]);
+    setIsLoading(true);
+    const boardDocRef = doc(firestore, 'users', user.uid, 'canvasBoards', boardId);
 
+    const unsubBoard = onSnapshot(boardDocRef, (doc) => {
+      if (doc.exists()) {
+        setBoard({ ...(doc.data() as CanvasBoard), id: doc.id });
+      } else {
+        // Usar refs en lugar de valores directos
+        toastRef.current({
+          variant: 'destructive',
+          title: 'Error',
+          description: 'Este tablero no existe o no tienes permiso para verlo.',
+        });
+        routerRef.current.push('/');
+      }
+      setIsLoading(false);
+    }, (error) => {
+        console.error('Error fetching board:', error);
+        setIsLoading(false);
+        // Usar refs en lugar de valores directos
+        toastRef.current({
+            variant: 'destructive',
+            title: 'Error de Carga',
+            description: 'No se pudo cargar el tablero.',
+        });
+        routerRef.current.push('/');
+    });
+
+    // CRÍTICO: NO crear listener de elements aquí
+    // useBoardStore.loadBoard() ya crea un listener de elements
+    // Crear listener duplicado causa:
+    // - Múltiples actualizaciones de estado
+    // - Re-renders duplicados
+    // - Memory leaks
+    // - Saturación del servidor
+    // setElements([]); // Mantener vacío - useBoardStore maneja elements
+
+    return () => {
+      unsubBoard();
+      // NO limpiar unsubElements porque no se crea
+    };
+  }, [firestore, user, boardId]); // CRÍTICO: Removido router y toast de dependencias
+
+  const handleRenameBoard = useCallback(async (newName: string) => {
+    if (!firestore || !user || !boardId || !board || !newName.trim()) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'No se puede renombrar el tablero. Verifica que estés autenticado.',
+      });
+      return;
+    }
+    if (newName.trim() === board.name) return;
+
+    try {
+      const boardDocRef = doc(firestore, 'users', user.uid, 'canvasBoards', boardId);
+      await updateDoc(boardDocRef, { 
+        name: newName.trim(),
+        updatedAt: serverTimestamp()
+      });
+      toast({ title: "Tablero renombrado", description: `El tablero ahora se llama "${newName.trim()}".` });
+    } catch (error: any) {
+      console.error('Error renombrando tablero:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: error.message || 'No se pudo renombrar el tablero. Verifica tus permisos.',
+      });
+    }
+  }, [firestore, user, board, boardId, toast]);
+  
   const handleDeleteBoard = useCallback(async () => {
     if (!firestore || !user || !boardId) return;
 
-    try {
-      const userId = user.uid;
-      const boardRef = doc(firestore, 'users', userId, 'canvasBoards', boardId);
-      
-      // Eliminar todos los elementos del board primero
-      const elementsCollection = collection(firestore, 'users', userId, 'canvasBoards', boardId, 'canvasElements');
-      const elementsSnapshot = await getDocs(elementsCollection);
-      const batch = writeBatch(firestore);
-      
-      elementsSnapshot.docs.forEach(elementDoc => {
-        batch.delete(elementDoc.ref);
-      });
-      
-      await batch.commit();
-      
-      // Eliminar el board
-      await deleteDoc(boardRef);
-      
-      // Actualizar estado local
-      setBoards(prev => prev.filter(board => board.id !== boardId));
-    } catch (error) {
-      console.error('Error al eliminar board:', error);
-      throw error;
-    }
-  }, [firestore, user, boardId]);
-
-  const clearCanvas = useCallback(async (elements: WithId<CanvasElement>[]) => {
-    if (!firestore || !user || !boardId || elements.length === 0) return;
+    toast({ title: 'Eliminando tablero...' });
 
     try {
-      const userId = user.uid;
-      const batch = writeBatch(firestore);
-      
-      elements.forEach(element => {
-        const elementRef = doc(firestore, 'users', userId, 'canvasBoards', boardId, 'canvasElements', element.id);
-        batch.delete(elementRef);
+        const boardDocRef = doc(firestore, 'users', user.uid, 'canvasBoards', boardId);
+        await deleteDoc(boardDocRef);
+        toast({ title: 'Tablero eliminado', description: 'El tablero y todo su contenido han sido eliminados.' });
+        router.push('/');
+    } catch (error) {
+        console.error("Error deleting board:", error);
+        toast({ variant: 'destructive', title: 'Error', description: 'No se pudo eliminar el tablero.' });
+    }
+  }, [firestore, user, boardId, router, toast]);
+
+  const clearCanvas = useCallback(async (elementsToClear: WithId<CanvasElement>[]) => {
+    if (!firestore || !user || !boardId || !elementsToClear) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'No se puede limpiar el tablero. Verifica que estés autenticado.',
       });
+      return;
+    }
+    
+    if (elementsToClear.length === 0) {
+      toast({
+        title: 'Tablero vacío',
+        description: 'El tablero ya está vacío.',
+      });
+      return;
+    }
+
+    try {
+      const elementsRef = collection(firestore, 'users', user.uid, 'canvasBoards', boardId, 'canvasElements');
+      const batch = writeBatch(firestore);
+      elementsToClear.forEach(element => batch.delete(doc(elementsRef, element.id)));
+      
+      // Actualizar updatedAt del tablero
+      const boardDocRef = doc(firestore, 'users', user.uid, 'canvasBoards', boardId);
+      batch.update(boardDocRef, { updatedAt: serverTimestamp() });
       
       await batch.commit();
-    } catch (error) {
-      console.error('Error al limpiar canvas:', error);
-      throw error;
+      toast({ 
+        title: "Tablero Limpio", 
+        description: `Se eliminaron ${elementsToClear.length} elemento(s) del tablero.` 
+      });
+    } catch (error: any) {
+      console.error('Error limpiando tablero:', error);
+      toast({ 
+        variant: 'destructive', 
+        title: 'Error', 
+        description: error.message || 'No se pudo limpiar el tablero. Verifica tus permisos.' 
+      });
     }
-  }, [firestore, user, boardId]);
+  }, [firestore, user, boardId, toast]);
 
-  return {
-    boards,
-    handleRenameBoard,
-    handleDeleteBoard,
-    clearCanvas,
-  };
+
+  return { board, boards, elements, isLoading, handleRenameBoard, handleDeleteBoard, clearCanvas };
 }
-

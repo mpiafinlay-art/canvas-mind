@@ -48,7 +48,6 @@ interface BoardState {
 
   loadBoard: (boardId: string, userId: string) => Promise<string | null>;
   createBoard: (userId: string, boardName?: string) => Promise<string>;
-  updateBoard: (updates: Partial<Board>) => Promise<void>;
   addElement: (element: Omit<CanvasElement, 'id'>) => Promise<void>;
   updateElement: (elementId: string, updates: Partial<CanvasElement>) => Promise<void>;
   deleteElement: (elementId: string) => Promise<void>;
@@ -116,7 +115,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
               Array.from(newIds).some(id => !currentIds.has(id));
             
             // Si los IDs cambiaron, actualizar siempre
-            if (idsChanged) {
+            if (idsChanged || currentElements.length === 0) {
               set({ elements: newElements, isLoading: false });
             } else {
               // Si los IDs son iguales, comparar contenido de cada elemento
@@ -162,7 +161,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
                   Array.from(currentIds).some(id => !newIds.has(id)) ||
                   Array.from(newIds).some(id => !currentIds.has(id));
                 
-                if (idsChanged) {
+                if (idsChanged || currentElements.length === 0) {
                   set({ elements: newElements, isLoading: false });
                 } else {
                   const contentChanged = currentElements.some((el) => {
@@ -209,7 +208,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
               Array.from(currentIds).some(id => !newIds.has(id)) ||
               Array.from(newIds).some(id => !currentIds.has(id));
             
-            if (idsChanged) {
+            if (idsChanged || currentElements.length === 0) {
               set({ elements: newElements, isLoading: false });
             } else {
               const contentChanged = currentElements.some((el) => {
@@ -231,7 +230,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
         );
       }
       
-      set({ board: boardData, unsubscribeElements: unsubscribe, selectedElementIds: [] });
+      set({ board: boardData, unsubscribeElements: unsubscribe, selectedElementIds: [], isLoading: false });
       console.log('✅ [boardStore] Tablero cargado exitosamente:', { boardId, userId, boardName: boardData.name });
       return boardId;
     } catch (error) {
@@ -252,59 +251,23 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   createBoard: async (userId: string, boardName: string = "Mi Primer Tablero") => {
     set({ isLoading: true });
-    const { serverTimestamp } = await import('firebase/firestore');
     const newBoard = {
         name: boardName,
         userId: userId,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
     };
     try {
         const db = getDb();
         // Usar la nueva estructura: users/{userId}/canvasBoards
         const docRef = await addDoc(collection(db, 'users', userId, 'canvasBoards'), newBoard);
-        console.log("✅ [boardStore] Nuevo tablero creado con ID:", docRef.id);
+        console.log("Nuevo tablero creado con ID:", docRef.id);
         set({ isLoading: false });
         return docRef.id;
     } catch (error) {
-        console.error("❌ [boardStore] Error al crear el tablero:", error);
+        console.error("Error al crear el tablero:", error);
         set({ error: "No se pudo crear el tablero.", isLoading: false });
         return "";
-    }
-  },
-
-  updateBoard: async (updates: Partial<Board>) => {
-    const { board } = get();
-    if (!board) {
-      console.error("❌ [boardStore] No hay tablero cargado para actualizar");
-      return;
-    }
-
-    const userId = board.userId || (board as { ownerId?: string }).ownerId;
-    if (!userId) {
-      console.error("❌ [boardStore] No se pudo obtener userId para actualizar tablero");
-      return;
-    }
-
-    try {
-      const db = getDb();
-      const { serverTimestamp } = await import('firebase/firestore');
-      const boardRef = doc(db, 'users', userId, 'canvasBoards', board.id);
-      
-      // CRÍTICO: Agregar updatedAt con serverTimestamp para sincronización precisa
-      const updatesWithTimestamp = {
-        ...updates,
-        updatedAt: serverTimestamp(),
-      };
-      
-      // Guardar directamente en Firestore de forma robusta
-      await updateDoc(boardRef, updatesWithTimestamp);
-      
-      // Actualizar estado local inmediatamente para feedback visual
-      set({ board: { ...board, ...updates } as WithId<Board> });
-    } catch (error) {
-      console.error("❌ [boardStore] Error al actualizar el tablero:", error);
-      throw error;
     }
   },
 
@@ -337,14 +300,11 @@ export const useBoardStore = create<BoardState>((set, get) => ({
 
   updateElement: async (elementId: string, updates: Partial<CanvasElement>) => {
     const { board } = get();
-    if (!board) {
-      console.error("❌ [boardStore] No hay tablero cargado para actualizar elemento");
-      return;
-    }
+    if (!board) return;
 
     const userId = board.userId || (board as { ownerId?: string }).ownerId;
     if (!userId) {
-      console.error("❌ [boardStore] No se pudo obtener userId para actualizar elemento");
+      console.error("No se pudo obtener userId para actualizar elemento");
       return;
     }
 
@@ -352,17 +312,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       const db = getDb();
       // Usar la nueva estructura: users/{userId}/canvasBoards/{boardId}/canvasElements/{elementId}
       const elementRef = doc(db, 'users', userId, 'canvasBoards', board.id, 'canvasElements', elementId);
-      
-      // CRÍTICO: Agregar updatedAt con serverTimestamp para sincronización precisa
-      const { serverTimestamp } = await import('firebase/firestore');
-      const updatesWithTimestamp = {
-        ...updates,
-        updatedAt: serverTimestamp(),
-      };
-      
-      // Guardar directamente en Firestore de forma robusta
-      await updateDoc(elementRef, updatesWithTimestamp);
-      
+      await updateDoc(elementRef, updates);
       // CRÍTICO: NO actualizar estado local aquí - el listener onSnapshot lo hará automáticamente
       // Actualizar el estado local causa condición de carrera con el listener:
       // - El listener puede actualizar después, causando estados inconsistentes
@@ -370,9 +320,7 @@ export const useBoardStore = create<BoardState>((set, get) => ({
       // - Conflictos entre estado local y Firestore
       // El listener onSnapshot ya maneja todas las actualizaciones de elementos
     } catch (error) {
-      console.error("❌ [boardStore] Error al actualizar el elemento:", error);
-      // Re-lanzar el error para que el componente pueda manejarlo si es necesario
-      throw error;
+      console.error("Error al actualizar el elemento:", error);
     }
   },
 

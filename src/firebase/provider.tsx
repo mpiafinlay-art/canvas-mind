@@ -6,7 +6,6 @@ import type { Auth, User } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
 import type { FirebaseStorage } from 'firebase/storage';
 import { createContext, useContext, type ReactNode } from 'react';
-import { FirebaseClientProvider } from './client-provider';
 
 export interface FirebaseContextState {
   firebaseApp: FirebaseApp | null;
@@ -66,7 +65,7 @@ export const useUser = (): UserHookResult => {
   return { user, isUserLoading, userError };
 };
 
-// FirebaseProvider - wrapper que usa FirebaseClientProvider
 export function FirebaseProvider({ children }: { children: ReactNode }) {
-  return <FirebaseClientProvider>{children}</FirebaseClientProvider>;
+    console.error("FirebaseProvider is a dummy component. Use FirebaseClientProvider instead.");
+    return <>{children}</>;
 }

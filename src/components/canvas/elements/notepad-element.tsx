@@ -107,16 +107,6 @@ export default function NotepadElement(props: CommonElementProps) {
   
   const currentPageIndex = typedContent.currentPage ?? 0;
   
-  // Refs para mantener referencias estables y evitar loops
-  const typedContentRef = useRef(typedContent);
-  const currentPageIndexRef = useRef(currentPageIndex);
-  
-  // Sincronizar refs cuando cambian
-  useEffect(() => {
-    typedContentRef.current = typedContent;
-    currentPageIndexRef.current = currentPageIndex;
-  }, [typedContent, currentPageIndex]);
-  
   // Hook de autoguardado robusto para el contenido del cuaderno
   // IMPORTANTE: Se actualiza cuando cambia currentPageIndex para evitar stale closures
   const { saveStatus, handleBlur: handleAutoSaveBlur, handleChange, forceSave } = useAutoSave({
@@ -128,26 +118,20 @@ export default function NotepadElement(props: CommonElementProps) {
     },
     onSave: async (newHtml) => {
       if (isPreview || !contentRef.current) return;
-      // Usar refs para evitar dependencias circulares
-      const currentContent = typedContentRef.current;
-      const currentPage = currentPageIndexRef.current;
-      const currentPages = currentContent.pages || [''];
-      const currentPageContent = (currentPages[currentPage] || '').replace(/\s+/g, ' ').replace(/>\s+</g, '><').trim();
+      const currentPages = typedContent.pages || [''];
+      const currentPageContent = (currentPages[currentPageIndex] || '').replace(/\s+/g, ' ').replace(/>\s+</g, '><').trim();
       // Comparar contenido normalizado
       if (newHtml !== currentPageContent) {
         const newPages = [...currentPages];
-        newPages[currentPage] = newHtml;
-        await onUpdate(id, { content: { ...currentContent, pages: newPages } });
+        newPages[currentPageIndex] = newHtml;
+        await onUpdate(id, { content: { ...typedContent, pages: newPages } });
       }
     },
     debounceMs: 2000,
     disabled: isPreview,
     compareContent: (oldContent, newContent) => {
-      // Usar refs para evitar dependencias circulares
-      const currentContent = typedContentRef.current;
-      const currentPage = currentPageIndexRef.current;
-      const currentPages = currentContent.pages || [''];
-      const currentPageContent = (currentPages[currentPage] || '').replace(/\s+/g, ' ').replace(/>\s+</g, '><').trim();
+      const currentPages = typedContent.pages || [''];
+      const currentPageContent = (currentPages[currentPageIndex] || '').replace(/\s+/g, ' ').replace(/>\s+</g, '><').trim();
       // Normalizar ambos para comparación
       const normalizedOld = (oldContent || '').replace(/\s+/g, ' ').replace(/>\s+</g, '><').trim();
       const normalizedNew = (newContent || '').replace(/\s+/g, ' ').replace(/>\s+</g, '><').trim();
@@ -157,52 +141,20 @@ export default function NotepadElement(props: CommonElementProps) {
 
   // Función de guardado manual (para compatibilidad con código existente)
   const saveContent = useCallback(async () => {
-    if (isPreview || !contentRef.current) return;
-    
-    // CRÍTICO: Guardar el HTML actual directamente ANTES de llamar a forceSave
-    const currentHtml = contentRef.current.innerHTML;
-    const currentContent = typedContentRef.current;
-    const currentPage = currentPageIndexRef.current;
-    const currentPages = currentContent.pages || [''];
-    
-    // Actualizar la página actual con el contenido HTML actual
-    const newPages = [...currentPages];
-    newPages[currentPage] = currentHtml;
-    
-    // Guardar directamente en Firestore (esto es seguro, solo actualiza el contenido)
-    await onUpdate(id, { 
-      content: { ...currentContent, pages: newPages }
-    });
-    
-    // También ejecutar forceSave para mantener sincronización del hook
     await forceSave();
-  }, [forceSave, isPreview, contentRef, typedContentRef, currentPageIndexRef, onUpdate, id]);
-
-  // Ref para almacenar el contenido anterior y evitar loops
-  const prevPagesRef = useRef<string>('');
+  }, [forceSave]);
 
   useEffect(() => {
     if (contentRef.current) {
-      // Crear string estable para comparar
-      const pagesString = JSON.stringify(typedContent.pages) + currentPageIndex;
-      
-      // Solo ejecutar si realmente cambió
-      if (prevPagesRef.current === pagesString) {
-        return;
-      }
-      
-      prevPagesRef.current = pagesString;
-      
         const isFocused = document.activeElement === contentRef.current;
         if (!isFocused) {
             const pageContent = typedContent.pages?.[currentPageIndex] ?? '';
             // Limpiar contenido vacío o con solo <div><br></div>
             const cleanContent = pageContent === '<div><br></div>' || pageContent === '<div></div>' || pageContent.trim() === '' ? '' : pageContent;
             // CRÍTICO: Solo actualizar si NO está enfocado (preservar cursor)
+            const isFocused = document.activeElement === contentRef.current;
             if (!isFocused && contentRef.current.innerHTML !== cleanContent) {
-          // Usar helper para preservar cursor si hay uno guardado
-          const { updateInnerHTMLPreservingCursor } = require('@/lib/cursor-helper');
-          updateInnerHTMLPreservingCursor(contentRef.current, cleanContent);
+                contentRef.current.innerHTML = cleanContent;
             }
         }
     }
@@ -229,10 +181,8 @@ export default function NotepadElement(props: CommonElementProps) {
     getContent: () => titleRef.current?.innerText || '',
     onSave: async (newTitle) => {
       if (isPreview || !titleRef.current) return;
-      // Usar ref para evitar dependencias circulares
-      const currentContent = typedContentRef.current;
-      if (currentContent.title !== newTitle) {
-        const newContent: NotepadContent = { ...currentContent, title: newTitle };
+      if (typedContent.title !== newTitle) {
+        const newContent: NotepadContent = { ...typedContent, title: newTitle };
         onUpdate(id, { content: newContent });
       }
     },
@@ -255,49 +205,46 @@ export default function NotepadElement(props: CommonElementProps) {
   
   const handlePageChange = useCallback((newPage: number) => {
     if (isPreview) return;
-    // Usar ref para evitar dependencias circulares
-    const currentContent = typedContentRef.current;
-    if (newPage >= 0 && newPage < (currentContent.pages?.length || 0)) {
+    if (newPage >= 0 && newPage < (typedContent.pages?.length || 0)) {
       saveContent(); 
       onUpdate(id, {
-        content: { ...currentContent, currentPage: newPage }
+        content: { ...typedContent, currentPage: newPage }
       });
     }
-  }, [isPreview, onUpdate, id, saveContent]);
+  }, [isPreview, typedContent, onUpdate, id, saveContent]);
 
   const handleAddPage = useCallback(() => {
     if (isPreview) return;
-    // Usar ref para evitar dependencias circulares
-    const currentContent = typedContentRef.current;
-    if ((currentContent.pages?.length || 0) < 20) {
+    if ((typedContent.pages?.length || 0) < 20) {
       saveContent();
-      const newPages = [...(currentContent.pages || []), '']; // Página vacía sin <div><br></div>
+      const newPages = [...(typedContent.pages || []), '']; // Página vacía sin <div><br></div>
       onUpdate(id, {
-        content: { ...currentContent, pages: newPages, currentPage: newPages.length - 1 },
+        content: { ...typedContent, pages: newPages, currentPage: newPages.length - 1 },
       });
     }
-  }, [isPreview, onUpdate, id, saveContent]);
+  }, [isPreview, typedContent, onUpdate, id, saveContent]);
 
-  const toggleMinimize = useCallback(async (e: React.MouseEvent) => {
+  const toggleMinimize = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
     if (isPreview) return;
     
-    // CRÍTICO: Guardar contenido ANTES de minimizar y ESPERAR
-    await saveContent();
+    // FIX: Guardar contenido ANTES de minimizar para preservar el texto
+    saveContent();
     
-    // Esperar un momento adicional para asegurar que Firestore recibió el update
-    await new Promise(resolve => setTimeout(resolve, 150));
-    
+    // Esperar un momento para asegurar que el contenido se guardó
+    setTimeout(() => {
       const isMinimized = !!minimized;
       const currentSize = (properties as CanvasElementProperties)?.size || { width: 794, height: 1021 };
       
+      // Convertir currentSize a valores numéricos para originalSize
       const currentSizeNumeric = {
         width: typeof currentSize.width === 'number' ? currentSize.width : parseFloat(String(currentSize.width)) || 794,
         height: typeof currentSize.height === 'number' ? currentSize.height : parseFloat(String(currentSize.height)) || 1021,
       };
 
       if (isMinimized) {
+          // Restaurar: recuperar tamaño original y asegurar que el contenido se mantiene
           const { originalSize, ...restProps } = (properties || {}) as Partial<CanvasElementProperties>;
           const restoredSize = originalSize || { width: 794, height: 1021 };
           const newProperties: Partial<CanvasElementProperties> = { 
@@ -305,12 +252,14 @@ export default function NotepadElement(props: CommonElementProps) {
             size: restoredSize 
           };
           
+          // FIX: Preservar el contenido al restaurar
           onUpdate(id, {
               minimized: false,
               properties: newProperties,
-        // CRÍTICO: No tocar el contenido al restaurar
+              // No tocar el contenido, solo cambiar minimized y properties
           });
       } else {
+          // Minimizar: guardar tamaño actual y reducir altura
           const currentWidth = typeof currentSize.width === 'number' ? currentSize.width : parseFloat(String(currentSize.width)) || 794;
           onUpdate(id, {
               minimized: true,
@@ -319,9 +268,10 @@ export default function NotepadElement(props: CommonElementProps) {
                 size: { width: currentWidth, height: 48 }, 
                 originalSize: currentSizeNumeric 
               },
-        // CRÍTICO: No tocar el contenido al minimizar
+              // No tocar el contenido al minimizar
           });
       }
+    }, 100); // Pequeño delay para asegurar que saveContent se ejecutó
   }, [isPreview, minimized, properties, onUpdate, id, saveContent]);
   
   const handleCloseNotepad = useCallback((e: React.MouseEvent) => { 
@@ -355,10 +305,10 @@ export default function NotepadElement(props: CommonElementProps) {
         description: 'Generando imagen PNG de alta resolución del cuaderno.',
       });
 
-      // Capturar el elemento usando html2canvas con alta resolución (reducido 30%)
+      // Capturar el elemento usando html2canvas con alta resolución
       const canvas = await html2canvas(notepadCard, {
         backgroundColor: '#ffffff',
-        scale: 2.1, // Alta resolución reducida 30% (de 3x a 2.1x)
+        scale: 3, // Alta resolución (3x)
         useCORS: true,
         logging: false,
         allowTaint: false,
@@ -522,25 +472,7 @@ export default function NotepadElement(props: CommonElementProps) {
     }
   }, []);
 
-  const handleRemoveFormat = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (isPreview || !contentRef.current) return;
-    
-    const selection = window.getSelection();
-    // CRÍTICO: Solo ejecutar si hay selección válida
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-      return; // No hacer nada si no hay selección
-    }
-    
-    try {
-      execCommand(e, 'removeFormat');
-      // Disparar evento input para activar autoguardado
-      contentRef.current.dispatchEvent(new Event('input', { bubbles: true }));
-    } catch (error) {
-      console.error('Error al limpiar formato:', error);
-    }
-  }, [execCommand, isPreview, contentRef]);
+  const handleRemoveFormat = useCallback((e: React.MouseEvent) => execCommand(e, 'removeFormat'), [execCommand]);
   const handleInsertDate = useCallback((e: React.MouseEvent) => execCommand(e, 'insertHTML', `<span style="color: #a0a1a6;">-- ${format(new Date(), 'dd/MM/yy')} </span>`), [execCommand]);
   
   const handleSelectAllText = useCallback((e: React.MouseEvent) => {

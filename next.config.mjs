@@ -1,25 +1,34 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // CRÍTICO: Transpilar paquetes ESM para App Hosting
-  transpilePackages: [
-    'lucide-react',
-  ],
-  
-  // Ignorar errores de TypeScript y ESLint durante build
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  
-  // Configuración de imágenes 
+  // Imágenes sin optimización server-side
   images: {
     unoptimized: true,
   },
   
-  // Desactivar strict mode
-  reactStrictMode: false,
+  // Trailing slash para compatibilidad
+  trailingSlash: true,
+  
+  // Ignorar errores durante build
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  
+  // Webpack config
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+      };
+    }
+    return config;
+  },
 };
 
 export default nextConfig;

@@ -1,9 +1,15 @@
-
 'use client';
 
 import React, { useEffect, useState, useMemo, type ReactNode } from 'react';
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, type Auth, type User } from 'firebase/auth';
+import { 
+  getAuth, 
+  onAuthStateChanged, 
+  setPersistence, 
+  browserSessionPersistence,
+  type Auth, 
+  type User 
+} from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
@@ -43,47 +49,54 @@ export function FirebaseClientProvider({ children }: { children: ReactNode }) {
     if (typeof window === 'undefined') return;
     if (firebaseState.initialized) return;
 
-    try {
-      let app: FirebaseApp;
-      if (!getApps().length) {
-        app = initializeApp(firebaseConfig);
-      } else {
-        app = getApp();
+    const initFirebase = async () => {
+      try {
+        let app: FirebaseApp;
+        if (!getApps().length) {
+          app = initializeApp(firebaseConfig);
+        } else {
+          app = getApp();
+        }
+
+        const authInstance = getAuth(app);
+        
+        // CRÍTICO: Configurar persistencia de SESIÓN
+        // La sesión se cierra cuando el usuario cierra el navegador/pestaña
+        // Pero se mantiene mientras la pestaña esté abierta (incluso semanas)
+        await setPersistence(authInstance, browserSessionPersistence);
+        console.log('✅ Firebase Auth configurado con persistencia de SESIÓN');
+        
+        const firestoreInstance = getFirestore(app);
+        const storageInstance = getStorage(app);
+
+        console.log('✅ Firebase inicializado correctamente');
+        
+        setFirebaseState({
+          firebaseApp: app,
+          auth: authInstance,
+          firestore: firestoreInstance,
+          storage: storageInstance,
+          initialized: true,
+          initError: null,
+        });
+      } catch (error) {
+        console.error('❌ Error al inicializar Firebase:', error);
+        setFirebaseState({
+          firebaseApp: null,
+          auth: null,
+          firestore: null,
+          storage: null,
+          initialized: true,
+          initError: error instanceof Error ? error : new Error('Error desconocido'),
+        });
+        setUserState({ user: null, isUserLoading: false, userError: null });
       }
+    };
 
-      const authInstance = getAuth(app);
-      // CRÍTICO: Configurar persistencia para usuarios anónimos (localStorage por defecto)
-      // Esto asegura que los usuarios anónimos persistan después de redirects
-      // Firebase Auth usa browserLocalPersistence por defecto, pero lo configuramos explícitamente
-      const firestoreInstance = getFirestore(app);
-      const storageInstance = getStorage(app);
-
-      console.log('✅ Firebase inicializado correctamente en el cliente');
-      
-      setFirebaseState({
-        firebaseApp: app,
-        auth: authInstance,
-        firestore: firestoreInstance,
-        storage: storageInstance,
-        initialized: true,
-        initError: null,
-      });
-    } catch (error) {
-      console.error('❌ Error al inicializar Firebase:', error);
-      setFirebaseState({
-        firebaseApp: null,
-        auth: null,
-        firestore: null,
-        storage: null,
-        initialized: true,
-        initError: error instanceof Error ? error : new Error('Error desconocido al inicializar Firebase'),
-      });
-      // Si Firebase falla, establecer estado sin usuario inmediatamente
-      setUserState({ user: null, isUserLoading: false, userError: null });
-    }
+    initFirebase();
   }, [firebaseState.initialized]);
 
-  // Manejar cambios de autenticación (SOLO UNA VEZ - evita errores en cascada)
+  // Manejar cambios de autenticación
   useEffect(() => {
     if (!firebaseState.auth || !firebaseState.initialized) {
       if (firebaseState.initialized) {
@@ -95,18 +108,19 @@ export function FirebaseClientProvider({ children }: { children: ReactNode }) {
     let isMounted = true;
     const unsubscribe = onAuthStateChanged(
       firebaseState.auth,
-      async (user) => {
+      (user) => {
         if (!isMounted) return;
         
         if (user && typeof window !== 'undefined') {
-          const hasRecentLogin = sessionStorage.getItem('hasRecentLogin') === 'true';
-          if (!hasRecentLogin) {
-            sessionStorage.setItem('hasRecentLogin', 'true');
-            sessionStorage.setItem('loginTimestamp', Date.now().toString());
-            if (user.isAnonymous) {
-              sessionStorage.setItem('anonymousUserId', user.uid);
-            }
+          // Marcar que hay sesión activa
+          sessionStorage.setItem('hasActiveSession', 'true');
+          if (user.isAnonymous) {
+            sessionStorage.setItem('isAnonymousUser', 'true');
           }
+        } else if (typeof window !== 'undefined') {
+          // Limpiar marcadores de sesión
+          sessionStorage.removeItem('hasActiveSession');
+          sessionStorage.removeItem('isAnonymousUser');
         }
         
         if (isMounted) {
@@ -126,8 +140,7 @@ export function FirebaseClientProvider({ children }: { children: ReactNode }) {
     };
   }, [firebaseState.auth, firebaseState.initialized]);
 
-  // CRÍTICO: Depender de valores primitivos específicos, no de objetos completos
-  // Esto previene re-creaciones innecesarias del contexto y re-renders en cascada
+  // Valor del contexto memoizado
   const contextValue = useMemo(
     (): FirebaseContextState => ({
       firebaseApp: firebaseState.firebaseApp,
@@ -145,7 +158,7 @@ export function FirebaseClientProvider({ children }: { children: ReactNode }) {
       userState.user,
       userState.isUserLoading,
       userState.userError,
-    ] // ✅ Dependencias primitivas específicas
+    ]
   );
 
   return (
