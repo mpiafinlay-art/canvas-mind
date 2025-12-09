@@ -3,7 +3,8 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { WithId, CanvasElement, ElementType } from '@/lib/types';
-import { useUser, useFirestore } from '@/firebase/provider';
+import { useAuthContext } from '@/context/AuthContext';
+import { getFirebaseFirestore } from '@/lib/firebase';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 type CanvasInteractionsProps = {
@@ -21,8 +22,8 @@ export function useCanvasInteractions({
   addElement,
   getNextZIndex,
 }: CanvasInteractionsProps) {
-  const firestore = useFirestore();
-  const { user } = useUser();
+  const firestore = getFirebaseFirestore();
+  const { user } = useAuthContext();
 
   const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
   const [activatedElementId, setActivatedElementId] = useState<string | null>(null);

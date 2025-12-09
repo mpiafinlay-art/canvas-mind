@@ -1,11 +1,16 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Pause, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Play, Pause, RotateCcw, GripVertical } from 'lucide-react';
 import type { CommonElementProps } from '@/lib/types';
 
-export default function StopwatchElement({ id, onUpdate, onSelectElement, isSelected }: CommonElementProps) {
+/**
+ * Cronómetro - Diseño moderno y compacto
+ * - Arrastrable por el grip
+ * - Botones pequeños e intuitivos
+ * - Diseño limpio con gradiente sutil
+ */
+export default function StopwatchElement({ id, onUpdate, onSelectElement, isSelected, deleteElement }: CommonElementProps) {
   const [time, setTime] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -31,70 +36,75 @@ export default function StopwatchElement({ id, onUpdate, onSelectElement, isSele
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     const centiseconds = Math.floor((ms % 1000) / 10);
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
+    return { minutes, seconds, centiseconds };
   };
 
-  const handleStart = useCallback(() => {
-    setIsRunning(true);
+  const handleToggle = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsRunning(prev => !prev);
   }, []);
 
-  const handlePause = useCallback(() => {
+  const handleReset = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
     setIsRunning(false);
+    setTime(0);
   }, []);
 
-
-  const handleClose = useCallback(() => {
-    onUpdate(id, { hidden: true });
-  }, [id, onUpdate]);
+  const { minutes, seconds, centiseconds } = formatTime(time);
 
   return (
-      <div
-        className="bg-black text-white rounded-lg p-4 flex flex-col items-center justify-center gap-2 shadow-lg relative"
-        style={{ width: '100%', height: '100%' }}
-        onClick={() => onSelectElement(id, false)}
-      >
-        {/* Botón X arriba a la derecha */}
-        <Button 
-          size="icon" 
-          variant="ghost" 
-          className="absolute top-2 right-2 h-6 w-6 text-white hover:bg-gray-800 hover:text-white p-0"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleClose();
-          }}
-        >
-          <X className="h-4 w-4" />
-        </Button>
-        
-        <div className="text-3xl font-mono font-bold">{formatTime(time)}</div>
-        <div className="flex gap-2">
-          {!isRunning ? (
-            <Button 
-              size="icon" 
-              variant="outline" 
-              className="bg-white text-black hover:bg-gray-200 h-7 w-7" 
-              onClick={(e) => {
-                e.stopPropagation();
-                handleStart();
-              }}
-            >
-              <Play className="h-3 w-3" />
-            </Button>
-          ) : (
-            <Button 
-              size="icon" 
-              variant="outline" 
-              className="bg-white text-black hover:bg-gray-200 h-7 w-7" 
-              onClick={(e) => {
-                e.stopPropagation();
-                handlePause();
-              }}
-            >
-              <Pause className="h-3 w-3" />
-            </Button>
-          )}
+    <div
+      className="w-full h-full flex flex-col rounded-xl overflow-hidden shadow-lg"
+      style={{ 
+        background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+        minWidth: '140px',
+        minHeight: '80px'
+      }}
+      onClick={() => onSelectElement(id, false)}
+    >
+      {/* Header con grip para arrastrar */}
+      <div className="drag-handle flex items-center justify-center py-1 cursor-grab active:cursor-grabbing bg-black/20">
+        <GripVertical className="w-4 h-4 text-white/40" />
+      </div>
+      
+      {/* Display del tiempo */}
+      <div className="flex-1 flex items-center justify-center px-3 py-2">
+        <div className="flex items-baseline gap-0.5 font-mono">
+          <span className="text-2xl font-bold text-white">
+            {minutes.toString().padStart(2, '0')}
+          </span>
+          <span className="text-lg text-white/60">:</span>
+          <span className="text-2xl font-bold text-white">
+            {seconds.toString().padStart(2, '0')}
+          </span>
+          <span className="text-xs text-white/40 ml-0.5">
+            .{centiseconds.toString().padStart(2, '0')}
+          </span>
         </div>
       </div>
+      
+      {/* Controles */}
+      <div className="flex items-center justify-center gap-2 py-2 px-3 bg-black/20">
+        <button
+          onClick={handleToggle}
+          className={`
+            w-8 h-8 rounded-full flex items-center justify-center transition-all
+            ${isRunning 
+              ? 'bg-amber-500 hover:bg-amber-600 text-white' 
+              : 'bg-emerald-500 hover:bg-emerald-600 text-white'
+            }
+          `}
+        >
+          {isRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+        </button>
+        
+        <button
+          onClick={handleReset}
+          className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all"
+        >
+          <RotateCcw className="w-3.5 h-3.5 text-white/70" />
+        </button>
+      </div>
+    </div>
   );
 }
-

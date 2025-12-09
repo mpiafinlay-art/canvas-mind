@@ -166,8 +166,8 @@ export async function uploadFile(
     };
   }
 
-  // Validar el tamaño del archivo (máximo 10MB)
-  const maxSize = 10 * 1024 * 1024; // 10MB
+  // Validar el tamaño del archivo (máximo 20MB - se comprimirá a 200KB y 72 DPI)
+  const maxSize = 20 * 1024 * 1024; // 20MB
   if (file.size > maxSize) {
     return {
       success: false,
@@ -176,7 +176,7 @@ export async function uploadFile(
       fileName: '',
       size: file.size,
       type: file.type,
-      error: 'El archivo es demasiado grande. El tamaño máximo es 10MB',
+      error: 'El archivo es demasiado grande. El tamaño máximo es 20MB',
     };
   }
 
@@ -202,17 +202,19 @@ export async function uploadFile(
     });
 
     // Comprimir imagen si es necesario (máximo 200KB y 72 DPI efectivo)
+    // PERMITE archivos de hasta 20MB, pero SIEMPRE comprime a 200KB y 72 DPI
     let fileToUpload = file;
     if (file.type.startsWith('image/') && !file.type.includes('svg')) {
-      console.log('📦 Comprimiendo imagen a máximo 200KB y 72 DPI efectivo...');
+      const originalSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+      console.log(`📦 Comprimiendo imagen (${originalSizeMB}MB) a máximo 200KB y 72 DPI efectivo...`);
       try {
         fileToUpload = await compressImage(file, 200);
         const finalSizeKB = fileToUpload.size / 1024;
         
-        // VERIFICACIÓN CRÍTICA: El archivo NUNCA debe exceder 200KB
+        // VERIFICACIÓN CRÍTICA: El archivo NUNCA debe exceder 200KB después de compresión
         if (finalSizeKB > 200) {
           console.error(`❌ ERROR: Archivo comprimido excede 200KB: ${finalSizeKB.toFixed(2)}KB`);
-          // Intentar compresión más agresiva
+          // Intentar compresión más agresiva con calidad más baja
           fileToUpload = await compressImage(file, 200);
           const retrySizeKB = fileToUpload.size / 1024;
           if (retrySizeKB > 200) {
@@ -228,24 +230,34 @@ export async function uploadFile(
           }
         }
         
-        console.log(`✅ Imagen comprimida a 72 DPI efectivo: ${(file.size / 1024).toFixed(2)}KB → ${finalSizeKB.toFixed(2)}KB`);
+        console.log(`✅ Imagen comprimida a 72 DPI efectivo: ${originalSizeMB}MB → ${finalSizeKB.toFixed(2)}KB`);
       } catch (compressError) {
-        console.warn('⚠️ Error al comprimir imagen, subiendo original:', compressError);
-        // NO continuar con el archivo original si excede 200KB
-        if (file.size > 200 * 1024) {
-          return {
-            success: false,
-            url: '',
-            path: '',
-            fileName: '',
-            size: file.size,
-            type: file.type,
-            error: `Error al comprimir imagen. El archivo original (${(file.size / 1024).toFixed(2)}KB) excede el límite de 200KB.`,
-          };
-        }
-        // Solo continuar si el archivo original es menor a 200KB
+        console.error('❌ Error al comprimir imagen:', compressError);
+        // SIEMPRE rechazar si no se puede comprimir (archivos grandes deben comprimirse)
+        return {
+          success: false,
+          url: '',
+          path: '',
+          fileName: '',
+          size: file.size,
+          type: file.type,
+          error: `Error al comprimir imagen. No se pudo procesar el archivo de ${(file.size / (1024 * 1024)).toFixed(2)}MB.`,
+        };
       }
-    } else if (file.size > 200 * 1024) {
+    } else if (file.type.startsWith('image/') && file.type.includes('svg')) {
+      // SVG no se comprime, pero verificar tamaño
+      if (file.size > 5 * 1024 * 1024) { // 5MB máximo para SVG
+        return {
+          success: false,
+          url: '',
+          path: '',
+          fileName: '',
+          size: file.size,
+          type: file.type,
+          error: `El archivo SVG (${(file.size / (1024 * 1024)).toFixed(2)}MB) excede el límite máximo de 5MB permitido.`,
+        };
+      }
+    } else {
       // Para archivos no imagen que exceden 200KB
       return {
         success: false,
@@ -254,7 +266,7 @@ export async function uploadFile(
         fileName: '',
         size: file.size,
         type: file.type,
-        error: `El archivo (${(file.size / 1024).toFixed(2)}KB) excede el límite máximo de 200KB permitido.`,
+        error: `Solo se permiten archivos de imagen. El archivo (${(file.size / 1024).toFixed(2)}KB) no es una imagen válida.`,
       };
     }
 

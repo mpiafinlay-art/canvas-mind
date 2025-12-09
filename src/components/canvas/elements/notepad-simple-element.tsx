@@ -6,9 +6,9 @@ import { cn } from '@/lib/utils';
 import { useAutoSave } from '@/hooks/use-auto-save';
 import { SaveStatusIndicator } from '@/components/canvas/save-status-indicator';
 import { GripVertical, Search, Calendar, Trash2, X } from 'lucide-react';
-import { insertDictationTextToInput } from '@/lib/dictation-helper';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
+import SmartCategorizer from './smart-categorizer';
 
 // Type guard para NotepadSimpleContent
 function isNotepadSimpleContent(content: unknown): content is NotepadSimpleContent {
@@ -86,29 +86,6 @@ export default function NotepadSimpleElement(props: CommonElementProps) {
   };
 
   // Soporte para dictado: insertar texto cuando está escuchando y el textarea está enfocado
-  const dictationStateRef = useRef<{ lastInsertedText: string; lastFinalText: string }>({ lastInsertedText: '', lastFinalText: '' });
-  
-  useEffect(() => {
-    if (!isListening || !isSelected) {
-      if (!isListening) {
-        dictationStateRef.current = { lastInsertedText: '', lastFinalText: '' };
-      }
-      return;
-    }
-
-    if (!finalTranscript && !interimTranscript) return;
-
-    if (textareaRef.current && document.activeElement === textareaRef.current) {
-      insertDictationTextToInput(
-        textareaRef.current,
-        liveTranscript || '',
-        finalTranscript || '',
-        dictationStateRef.current
-      );
-      handleChange();
-    }
-  }, [isListening, liveTranscript, finalTranscript, interimTranscript, isSelected, handleChange]);
-
   // Scroll infinito: agregar más espacio cuando el usuario llega al final
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -253,6 +230,15 @@ export default function NotepadSimpleElement(props: CommonElementProps) {
           </Button>
         </div>
       </div>
+
+      {/* Categorizador Inteligente */}
+      <SmartCategorizer 
+        content={isNotepadSimpleContent(content) ? content : textContent} 
+        onCategorySelect={(category) => {
+          // Opcional: filtrar contenido por categoría
+          console.log('Categoría seleccionada:', category);
+        }}
+      />
 
       {/* CONTENIDO - Scroll infinito con líneas azules */}
       <div className="flex-1 relative overflow-hidden" style={{ backgroundColor: '#ffff00' }}>

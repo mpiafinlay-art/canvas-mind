@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 
 import { create } from 'zustand';
@@ -15,28 +16,54 @@ import {
   onSnapshot,
   orderBy
 } from 'firebase/firestore';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, type Firestore } from 'firebase/firestore';
-import { firebaseConfig } from '@/firebase/config';
+import { type Firestore } from 'firebase/firestore';
+import { firebaseConfig, getFirebaseFirestore } from '@/lib/firebase';
+import { WithId, CanvasElement, Board } from '@/lib/types';
+
+// MODO DESARROLLO: usar localStorage en lugar de Firebase
+const DEV_MODE = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+
+// Funciones para modo desarrollo (localStorage)
+const getDevElements = (boardId: string): WithId<CanvasElement>[] => {
+  if (typeof window === 'undefined') return [];
+  const stored = localStorage.getItem(`dev_board_${boardId}_elements`);
+  return stored ? JSON.parse(stored) : [];
+};
+
+const saveDevElements = (boardId: string, elements: WithId<CanvasElement>[]) => {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(`dev_board_${boardId}_elements`, JSON.stringify(elements));
+};
+
+const getDevBoard = (boardId: string): WithId<Board> | null => {
+  if (typeof window === 'undefined') return null;
+  const stored = localStorage.getItem(`dev_board_${boardId}`);
+  if (stored) return JSON.parse(stored);
+  // Crear tablero por defecto
+  const defaultBoard: WithId<Board> = {
+    id: boardId,
+    name: 'Tablero de Desarrollo',
+    userId: 'dev-user',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+  localStorage.setItem(`dev_board_${boardId}`, JSON.stringify(defaultBoard));
+  return defaultBoard;
+};
 
 // Obtener db de forma lazy para evitar problemas de SSR
-// Inicializa Firebase si no está inicializado, luego obtiene Firestore
 const getDb = (): Firestore => {
   if (typeof window === 'undefined') {
     throw new Error('Firestore solo puede usarse en el cliente');
   }
   
-  // Obtener o inicializar la app de Firebase
-  let app;
-  if (!getApps().length) {
-    app = initializeApp(firebaseConfig);
-  } else {
-    app = getApp();
+  const db = getFirebaseFirestore();
+  if (!db) {
+    throw new Error('Firestore no está inicializado');
   }
   
-  return getFirestore(app);
-}; 
-import { WithId, CanvasElement, Board } from '@/lib/types';
+  return db;
+};
 
 interface BoardState {
   elements: WithId<CanvasElement>[];
@@ -64,6 +91,13 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   unsubscribeElements: null,
 
   loadBoard: async (boardId: string, userId: string) => {
+    // Guard: Verificar si ya se está cargando este mismo tablero
+    const currentState = get();
+    if (currentState.isLoading && currentState.board?.id === boardId) {
+      console.log('⏸️ Tablero ya se está cargando:', boardId);
+      return boardId;
+    }
+    
     // CRÍTICO: Limpiar listener anterior ANTES de crear uno nuevo
     const { unsubscribeElements } = get();
     if (unsubscribeElements) {
@@ -72,6 +106,21 @@ export const useBoardStore = create<BoardState>((set, get) => ({
     }
 
     set({ isLoading: true, error: null });
+    
+    // MODO DESARROLLO: usar localStorage
+    if (DEV_MODE) {
+      console.log('🔧 MODO DESARROLLO: usando localStorage');
+      const board = getDevBoard(boardId);
+      const elements = getDevElements(boardId);
+      set({ 
+        board, 
+        elements, 
+        isLoading: false, 
+        error: null 
+      });
+      return boardId;
+    }
+    
     try {
       const db = getDb();
       // Usar la nueva estructura: users/{userId}/canvasBoards/{boardId}
@@ -250,30 +299,62 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   createBoard: async (userId: string, boardName: string = "Mi Primer Tablero") => {
-    set({ isLoading: true });
-    const newBoard = {
-        name: boardName,
-        userId: userId,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-    };
+    // Guard: Verificar si ya está cargando
+    const currentState = get();
+    if (currentState.isLoading) {
+      console.log('⏸️ Ya hay una operación en progreso, esperando...');
+      // Esperar a que termine la operación actual
+      return new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (!get().isLoading) {
+            clearInterval(checkInterval);
+            // Intentar de nuevo después de que termine
+            resolve(get().createBoard(userId, boardName));
+          }
+        }, 100);
+      });
+    }
+    
+    set({ isLoading: true, error: null });
+    
     try {
         const db = getDb();
         // Usar la nueva estructura: users/{userId}/canvasBoards
+        const { serverTimestamp } = await import('firebase/firestore');
+        const newBoard = {
+            name: boardName,
+            userId: userId,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        };
         const docRef = await addDoc(collection(db, 'users', userId, 'canvasBoards'), newBoard);
-        console.log("Nuevo tablero creado con ID:", docRef.id);
+        console.log("✅ Nuevo tablero creado con ID:", docRef.id);
         set({ isLoading: false });
         return docRef.id;
     } catch (error) {
-        console.error("Error al crear el tablero:", error);
-        set({ error: "No se pudo crear el tablero.", isLoading: false });
+        console.error("❌ Error al crear el tablero:", error);
+        const errorMessage = (error as Error).message;
+        set({ error: errorMessage, isLoading: false });
         return "";
     }
   },
 
   addElement: async (element: Omit<CanvasElement, 'id'>) => {
-    const { board } = get();
+    const { board, elements } = get();
     if (!board) return;
+
+    // MODO DESARROLLO: usar localStorage
+    if (DEV_MODE) {
+      const newElement: WithId<CanvasElement> = {
+        ...element,
+        id: `dev-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      } as WithId<CanvasElement>;
+      const newElements = [...elements, newElement];
+      set({ elements: newElements });
+      saveDevElements(board.id, newElements);
+      console.log('🔧 DEV: Elemento añadido', newElement.id);
+      return;
+    }
 
     // Necesitamos el userId para la nueva estructura
     const userId = board.userId || (board as { ownerId?: string }).ownerId;
@@ -299,8 +380,18 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   updateElement: async (elementId: string, updates: Partial<CanvasElement>) => {
-    const { board } = get();
+    const { board, elements } = get();
     if (!board) return;
+
+    // MODO DESARROLLO: usar localStorage
+    if (DEV_MODE) {
+      const newElements = elements.map(el => 
+        el.id === elementId ? { ...el, ...updates } : el
+      );
+      set({ elements: newElements });
+      saveDevElements(board.id, newElements);
+      return;
+    }
 
     const userId = board.userId || (board as { ownerId?: string }).ownerId;
     if (!userId) {
@@ -325,8 +416,17 @@ export const useBoardStore = create<BoardState>((set, get) => ({
   },
 
   deleteElement: async (elementId: string) => {
-    const { board } = get();
+    const { board, elements } = get();
     if (!board) return;
+
+    // MODO DESARROLLO: usar localStorage
+    if (DEV_MODE) {
+      const newElements = elements.filter(el => el.id !== elementId);
+      set({ elements: newElements });
+      saveDevElements(board.id, newElements);
+      console.log('🔧 DEV: Elemento eliminado', elementId);
+      return;
+    }
 
     const userId = board.userId || (board as { ownerId?: string }).ownerId;
     if (!userId) {

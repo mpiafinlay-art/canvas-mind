@@ -3,17 +3,15 @@ import { useEffect, useRef } from 'react';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { useToast } from '@/hooks/use-toast';
 import type { FirestorePermissionError } from '@/firebase/errors';
-import { useUser } from '@/firebase/provider';
+import { useAuthContext } from '@/context/AuthContext';
 
 /**
  * A client-side component that listens for permission errors
  * and displays them as toasts for easier debugging during development.
- * IMPORTANT: This should ONLY be rendered within a client component that
- * has already established a Firebase context.
  */
 export default function FirebaseErrorListener() {
   const { toast } = useToast();
-  const { user } = useUser();
+  const { user } = useAuthContext();
   
   // CRÍTICO: Usar refs para evitar re-suscripciones cuando toast o user cambian
   const toastRef = useRef(toast);

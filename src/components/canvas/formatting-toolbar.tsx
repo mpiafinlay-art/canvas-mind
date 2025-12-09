@@ -1,7 +1,7 @@
 // src/components/canvas/formatting-toolbar.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Rnd } from 'react-rnd';
 import type { WithId, CanvasElement } from '@/lib/types';
 import {
@@ -12,22 +12,23 @@ import {
   Italic,
   Underline,
   Strikethrough,
-  List,
   Calendar,
   Eraser,
   X,
   Move,
   RectangleHorizontal,
   GripVertical,
-  MapPin,
   Link as LinkIcon,
   AlignLeft,
   AlignCenter,
   AlignRight,
   AlignJustify,
-  Search,
   ChevronDown,
   Paintbrush,
+  MapPin,
+  Timer,
+  Clock,
+  Highlighter,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import {
@@ -44,6 +45,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button as UIButton } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { ElementType } from '@/lib/types';
 
@@ -58,6 +60,7 @@ export interface FormattingToolbarProps {
   onPanToggle: () => void;
   addElement?: (type: ElementType, props?: any) => Promise<string>;
   isPanningActive?: boolean;
+  selectedElement?: WithId<CanvasElement> | null;
 }
 
 const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
@@ -71,30 +74,59 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
   onPanToggle,
   addElement,
   isPanningActive = false,
+  selectedElement,
 }) => {
+  // Detectar si el elemento seleccionado es un localizador/comment
+  const isCommentSelected = selectedElement?.type === 'comment';
   const [popoverOpen, setPopoverOpen] = useState<'fontSize' | 'underlineColor' | 'textColor' | 'highlight' | null>(null);
+  const highlightSelectionRef = useRef<Range | null>(null);
   const [fontSize, setFontSize] = useState('18px');
   const [rndPosition, setRndPosition] = useState({ x: 0, y: 0 });
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
+  
+  // Ref para evitar reinicializaciones innecesarias cuando el toolbar ya está abierto
+  const positionInitializedRef = useRef(false);
 
-  // Inicializar posición centrada arriba
+  // Consolidado: Inicializar posición UNA SOLA VEZ cuando se abre el toolbar (no en mobile)
+  // Evita ejecuciones duplicadas y conflictos usando un ref para rastrear si ya se inicializó
   useEffect(() => {
-    if (isOpen && !isMobileSheet) {
-      const savedPosition = localStorage.getItem('formattingToolbarPosition');
-      if (savedPosition) {
-        try {
-          setRndPosition(JSON.parse(savedPosition));
-        } catch (e) {
-          console.error('Failed to load formatting toolbar position', e);
+    // Resetear flag cuando se cierra el toolbar
+    if (!isOpen) {
+      positionInitializedRef.current = false;
+      return;
+    }
+
+    // Solo procesar si está abierto, no es mobile, y no se ha inicializado aún
+    if (isMobileSheet || positionInitializedRef.current) {
+      return;
+    }
+
+    // Marcar como inicializado ANTES de establecer la posición para evitar loops
+    positionInitializedRef.current = true;
+
+    // Inicializar posición desde localStorage o usar posición por defecto
+    const savedPosition = localStorage.getItem('formattingToolbarPosition');
+    if (savedPosition) {
+      try {
+        const parsed = JSON.parse(savedPosition);
+        // Validar que la posición sea válida
+        if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number' && 
+            !isNaN(parsed.x) && !isNaN(parsed.y)) {
+          setRndPosition(parsed);
+          return;
         }
-      } else {
-        // Centrar arriba
-        const centerX = (window.innerWidth - 600) / 2; // 600px es el ancho aproximado reducido 20%
-        setRndPosition({ x: centerX, y: 20 });
+      } catch (e) {
+        console.error('Failed to load formatting toolbar position', e);
       }
     }
-  }, [isOpen, isMobileSheet]);
+
+    // Si no hay posición guardada o es inválida, usar posición por defecto
+    if (typeof window !== 'undefined') {
+      const centerX = Math.max(0, (window.innerWidth - 600) / 2);
+      setRndPosition({ x: centerX, y: 20 });
+    }
+  }, [isOpen, isMobileSheet]); // Dependencias correctas: solo se ejecuta cuando cambian estos valores
 
   const onDragStop = (e: any, d: { x: number; y: number }) => {
     const newPosition = { x: d.x, y: d.y };
@@ -109,11 +141,22 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
   const handleAddLienzo = async () => {
     if (addElement) {
       try {
+        // Lienzo reducido (50% menos ancho) y centrado en viewport
+        const lienzoWidth = 400;  // Ancho reducido (antes 794)
+        const lienzoHeight = 510; // Alto proporcional reducido
+        
+        // Calcular centro del viewport
+        const viewportCenterX = typeof window !== 'undefined' ? window.innerWidth / 2 : 500;
+        const viewportCenterY = typeof window !== 'undefined' ? window.innerHeight / 2 : 400;
+        
         await addElement('container', {
           content: { title: 'Lienzo', elementIds: [] },
           properties: {
-            position: { x: 100, y: 100 },
-            size: { width: 794, height: 1021 },
+            position: { 
+              x: viewportCenterX - (lienzoWidth / 2), 
+              y: viewportCenterY - (lienzoHeight / 2) 
+            },
+            size: { width: lienzoWidth, height: lienzoHeight },
             backgroundColor: 'white',
           },
         });
@@ -125,6 +168,7 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
 
   const handleFormat = (e: React.MouseEvent, command: string, value?: string) => {
     e.preventDefault();
+    e.stopPropagation();
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) {
       const activeElement = document.activeElement as HTMLElement;
@@ -135,6 +179,8 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
         } else {
           document.execCommand(command, false);
         }
+        // Disparar evento input para guardar
+        activeElement.dispatchEvent(new Event('input', { bubbles: true }));
       }
       return;
     }
@@ -144,6 +190,13 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
     } else {
       document.execCommand(command, false);
     }
+    
+    // Disparar evento input para guardar cambios
+    const activeElement = document.activeElement as HTMLElement;
+    if (activeElement) {
+      activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    
     setPopoverOpen(null);
   };
 
@@ -157,7 +210,7 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
     const span = document.createElement('span');
     span.style.textDecoration = 'underline';
     span.style.textDecorationColor = color;
-    span.style.textDecorationThickness = '2px';
+    span.style.textDecorationThickness = '2.5px';
     span.appendChild(range.extractContents());
     range.insertNode(span);
     setPopoverOpen(null);
@@ -265,14 +318,21 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
 
   const handleInsertDate = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const span = document.createElement('span');
     span.style.color = '#a0a1a6';
     span.textContent = `-- ${format(new Date(), 'dd/MM/yy')} `;
     document.execCommand('insertHTML', false, span.outerHTML);
+    // Disparar evento input para guardar
+    const activeElement = document.activeElement as HTMLElement;
+    if (activeElement) {
+      activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   };
 
   const clearFormatting = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     document.execCommand('removeFormat', false);
     
     const selection = window.getSelection();
@@ -291,24 +351,47 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
         });
       }
     }
+    
+    // Disparar evento input para guardar
+    const activeElement = document.activeElement as HTMLElement;
+    if (activeElement) {
+      activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+    }
   };
 
   const handleList = (e: React.MouseEvent) => {
     e.preventDefault();
-    // Toggle entre lista ordenada y desordenada
+    e.stopPropagation();
+    // Insertar lista desordenada
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
       const container = range.commonAncestorContainer;
       if (container.nodeType === Node.ELEMENT_NODE) {
         const element = container as HTMLElement;
-        if (element.tagName === 'UL' || element.tagName === 'OL') {
+        // Si ya está en una lista, salir de la lista
+        if (element.tagName === 'UL' || element.tagName === 'OL' || element.closest('ul, ol')) {
           document.execCommand('insertUnorderedList', false);
         } else {
+          // Insertar nueva lista
           document.execCommand('insertUnorderedList', false);
         }
       } else {
+        // Insertar nueva lista
         document.execCommand('insertUnorderedList', false);
+      }
+      // Disparar evento input para guardar
+      const activeElement = document.activeElement as HTMLElement;
+      if (activeElement) {
+        activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    } else {
+      // Si no hay selección, insertar lista en el cursor
+      const activeElement = document.activeElement as HTMLElement;
+      if (activeElement && activeElement.isContentEditable) {
+        activeElement.focus();
+        document.execCommand('insertUnorderedList', false);
+        activeElement.dispatchEvent(new Event('input', { bubbles: true }));
       }
     }
   };
@@ -317,127 +400,164 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
     return null;
   }
 
-  // Clases Tailwind para el toolbar (fondo negro, botones blancos)
-  // Reducido 20%: todos los tamaños reducidos al 80%
+  // Clases Tailwind para el toolbar - COMPACTO sin espacios excesivos
   const toolbarClassName = cn(
-    "bg-black text-white py-1.5 px-2.5",
-    "flex items-center justify-center w-full min-h-[38px] gap-0.5",
-    "text-sm"
+    "bg-black text-white py-1 px-1.5",
+    "flex items-center justify-center w-full min-h-[32px] gap-0.5",
+    "text-xs"
   );
 
-  // Clases Tailwind para botones blancos redondeados (reducidos 20%)
+  // Botones blancos compactos
   const whiteButtonClassName = cn(
-    "bg-white border-none rounded-md px-2.5 py-1.5",
+    "bg-white border-none rounded px-1.5 py-1",
     "cursor-pointer flex items-center justify-center",
-    "min-w-[29px] h-7 transition-colors",
+    "min-w-[24px] h-6 transition-colors",
     "hover:bg-gray-100"
   );
 
-  // Clases Tailwind para iconos negros (reducidos 20%)
-  const iconClassName = "w-[14px] h-[14px] text-black";
+  // Iconos compactos
+  const iconClassName = "w-3.5 h-3.5 text-black";
 
-  // Clases Tailwind para cuadrados gris oscuro (reducidos 20%)
+  // Cuadrados gris oscuro compactos
   const darkSquareClassName = cn(
     "bg-[#2a2a2a] border-none rounded",
     "cursor-pointer flex items-center justify-center",
-    "w-7 h-7 p-1.5 transition-colors",
+    "w-6 h-6 p-1 transition-colors",
     "hover:bg-[#3a3a3a]"
   );
 
-  // Detectar si el elemento seleccionado es un comment
-  const selectedComment = elements.length > 0 && elements[0]?.type === 'comment' ? elements[0] : null;
-
   const toolbarContent = (
     <div className={toolbarClassName}>
-      {/* 0. MapPin (Fijar posición) - Botón blanco - SOLO para elementos comment */}
-      {selectedComment && onEditComment && (
-        <button
-          className={whiteButtonClassName}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onEditComment(selectedComment);
-          }}
-          title="Fijar posición en el tablero / Editar Etiqueta"
-        >
-          <MapPin className={iconClassName} />
-        </button>
+      {/* 0. MapPin (Fijar Posición) - Solo visible cuando hay un localizador seleccionado */}
+      {isCommentSelected && selectedElement && onEditComment && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              className={cn(whiteButtonClassName, "bg-teal-500 hover:bg-teal-600")}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onEditComment(selectedElement);
+              }}
+            >
+              <MapPin className="w-[14px] h-[14px] text-white" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Editar etiqueta de posición</p>
+          </TooltipContent>
+        </Tooltip>
       )}
 
       {/* 1. Tres puntos verticales (MoreVertical) - Cuadrado gris oscuro */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button 
-            className={darkSquareClassName} 
-            title="Más opciones"
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button 
+                className={darkSquareClassName} 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+              >
+                <MoreVertical className="w-[14px] h-[14px] text-white" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                <span>Opciones</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Más opciones</p>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* 2. Tag (Etiqueta/Marcador) - Botón blanco - Crea localizador */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={whiteButtonClassName}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              // Usar el handler original que ya funciona correctamente
+              onAddComment();
             }}
           >
-            <MoreVertical className="w-[14px] h-[14px] text-white" />
+            <Tag className={iconClassName} />
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
-            <span>Opciones</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Crear etiqueta / Localizador</p>
+        </TooltipContent>
+      </Tooltip>
 
-      {/* 2. Tag (Etiqueta/Marcador) - Botón blanco - Clonado de producción */}
-      <button
-        className={whiteButtonClassName}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          // Funcionalidad completa: crear localizador/etiqueta en el centro del viewport
-          if (onAddComment) {
-            onAddComment();
-          } else if (addElement) {
-            // Fallback: crear directamente si addElement está disponible
-            const viewportCenter = { 
-              x: typeof window !== 'undefined' ? window.innerWidth / 2 : 40000, 
-              y: typeof window !== 'undefined' ? window.innerHeight / 2 : 40000 
-            };
-            addElement('comment', {
-              content: { 
-                title: 'Nuevo Localizador', 
-                label: 'Localizador',
-                text: '' 
-              },
-              properties: {
-                position: viewportCenter,
-                size: { width: 48, height: 48 },
-              },
-            }).catch((error) => {
-              console.error('Error al crear localizador:', error);
-            });
-          }
-        }}
-        title="Crear etiqueta de posición / Localizador"
-      >
-        <Tag className={iconClassName} />
-      </button>
+      {/* 2b. Cronómetro */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={whiteButtonClassName}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              addElement?.('stopwatch');
+            }}
+          >
+            <Timer className={iconClassName} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Agregar cronómetro</p>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* 2c. Temporizador */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={whiteButtonClassName}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              addElement?.('countdown');
+            }}
+          >
+            <Clock className={iconClassName} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Agregar temporizador</p>
+        </TooltipContent>
+      </Tooltip>
 
       {/* 3. T (Tamaño de Fuente) - Botón blanco con Popover */}
       <Popover open={popoverOpen === 'fontSize'} onOpenChange={(open) => setPopoverOpen(open ? 'fontSize' : null)}>
-        <PopoverTrigger asChild>
-          <button
-            className={whiteButtonClassName}
-            title="Tamaño de Texto"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <Type className={iconClassName} />
-          </button>
-        </PopoverTrigger>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <button
+                className={whiteButtonClassName}
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                <Type className={iconClassName} />
+              </button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Tamaño de fuente</p>
+          </TooltipContent>
+        </Tooltip>
         <PopoverContent className="w-auto p-2 bg-white" onMouseDown={(e) => e.preventDefault()}>
           <div className="space-y-1">
             {['12px', '14px', '16px', '18px', '20px', '24px', '32px'].map((size) => (
               <button
                 key={size}
                 className="w-full text-left px-2 py-1 text-sm hover:bg-gray-100 rounded"
-                onClick={(e) => {
+                  onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   setFontSize(size);
@@ -448,9 +568,21 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
                     span.style.fontSize = size;
                     try {
                       range.surroundContents(span);
-                    } catch (e) {
+                    } catch (err) {
                       span.appendChild(range.extractContents());
                       range.insertNode(span);
+                    }
+                    // Disparar evento input para guardar
+                    const activeElement = document.activeElement as HTMLElement;
+                    if (activeElement) {
+                      activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                  } else {
+                    // Si no hay selección, aplicar al elemento activo
+                    const activeElement = document.activeElement as HTMLElement;
+                    if (activeElement && activeElement.isContentEditable) {
+                      activeElement.style.fontSize = size;
+                      activeElement.dispatchEvent(new Event('input', { bubbles: true }));
                     }
                   }
                   setPopoverOpen(null);
@@ -463,301 +595,441 @@ const FormattingToolbar: React.FC<FormattingToolbarProps> = ({
         </PopoverContent>
       </Popover>
 
-      {/* Separador visual */}
-      <div className="w-px h-6 bg-white/30 mx-1" />
 
-      {/* 4. Link (Enlaces) - Botón blanco */}
-      <button
-        className={whiteButtonClassName}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const selection = window.getSelection();
-          const url = prompt('Ingresa la URL del enlace:');
-          if (url) {
-            if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
-              // Hay texto seleccionado, convertirlo en enlace
-              const range = selection.getRangeAt(0);
-              const link = document.createElement('a');
-              link.href = url;
-              link.target = '_blank';
-              link.rel = 'noopener noreferrer';
-              link.appendChild(range.extractContents());
-              range.insertNode(link);
-            } else {
-              // No hay selección, insertar URL como texto con enlace
-              const link = document.createElement('a');
-              link.href = url;
-              link.target = '_blank';
-              link.rel = 'noopener noreferrer';
-              link.textContent = url;
-              document.execCommand('insertHTML', false, link.outerHTML);
-            }
-          }
-        }}
-        title="Insertar Enlace"
-      >
-        <LinkIcon className={iconClassName} />
-      </button>
-
-      {/* Separador visual */}
-      <div className="w-px h-6 bg-white/30 mx-1" />
-
-      {/* 5. Pincel (Color de Texto) - Botón blanco con Popover de colores */}
-      <Popover open={popoverOpen === 'textColor'} onOpenChange={(open) => setPopoverOpen(open ? 'textColor' : null)}>
-        <PopoverTrigger asChild>
-          <button
-            className={whiteButtonClassName}
-            title="Color de Texto"
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <Paintbrush className={iconClassName} />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-2 bg-white" onMouseDown={(e) => e.preventDefault()}>
-          <div className="text-xs text-gray-600 mb-2 px-1">Color de texto</div>
-          <div className="grid grid-cols-4 gap-2">
-            {[
-              { value: '#14b8a6' }, // Teal
-              { value: '#f97316' }, // Orange-red
-              { value: '#84cc16' }, // Lime green
-              { value: '#eab308' }, // Yellow
-              { value: '#f59e0b' }, // Goldenrod
-              { value: '#3b82f6' }, // Bright blue
-              { value: '#1f2937' }, // Dark gray
-              { value: '#475569' }, // Slate blue
-            ].map((color, idx) => (
-              <button
-                key={idx}
-                className="w-8 h-8 rounded border border-gray-300 hover:scale-110 transition-transform"
-                style={{ backgroundColor: color.value }}
-                onMouseDown={(e) => applyTextColor(e, color.value)}
-                title={`Color ${idx + 1}`}
-              />
-            ))}
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      {/* Separador visual */}
-      <div className="w-px h-6 bg-white/30 mx-1" />
-
-      {/* 5.5. Destacador (Highlight) - Botón blanco con Popover de colores - Solo si hay texto seleccionado */}
-      {(() => {
-        const selection = window.getSelection();
-        const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
-        if (!hasSelection) return null;
-        return (
-          <Popover open={popoverOpen === 'highlight'} onOpenChange={(open) => setPopoverOpen(open ? 'highlight' : null)}>
-            <PopoverTrigger asChild>
+      {/* 4. Link (Enlaces) - Botón blanco con Dialog */}
+      <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DialogTrigger asChild>
               <button
                 className={whiteButtonClassName}
-                title="Resaltar Texto"
-                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
               >
-                <Paintbrush className={iconClassName} />
+                <LinkIcon className={iconClassName} />
               </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-2 bg-white" onMouseDown={(e) => e.preventDefault()}>
-              <div className="text-xs text-gray-600 mb-2 px-1">Color de fondo</div>
-              <div className="grid grid-cols-4 gap-2">
-                {[
-                  { value: '#fef08a' }, // Amarillo pastel
-                  { value: '#fde68a' }, // Amarillo claro
-                  { value: '#fed7aa' }, // Naranja pastel
-                  { value: '#fecaca' }, // Rosa pastel
-                  { value: '#fbcfe8' }, // Rosa claro
-                  { value: '#e9d5ff' }, // Morado pastel
-                  { value: '#ddd6fe' }, // Morado claro
-                  { value: '#c7d2fe' }, // Azul pastel
-                ].map((color, idx) => (
-                  <button
-                    key={idx}
-                    className="w-8 h-8 rounded border border-gray-300 hover:scale-110 transition-transform"
-                    style={{ backgroundColor: color.value }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const sel = window.getSelection();
-                      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
-                        const range = sel.getRangeAt(0);
-                        const span = document.createElement('span');
-                        span.style.backgroundColor = color.value;
-                        try {
-                          span.appendChild(range.extractContents());
-                          range.insertNode(span);
-                          range.setStartAfter(span);
-                          range.collapse(true);
-                          sel.removeAllRanges();
-                          sel.addRange(range);
-                          const activeElement = document.activeElement as HTMLElement;
-                          if (activeElement) {
-                            activeElement.dispatchEvent(new Event('input', { bubbles: true }));
-                          }
-                        } catch (err) {
-                          console.error('Error aplicando resaltado:', err);
+            </DialogTrigger>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Insertar Enlace</p>
+          </TooltipContent>
+        </Tooltip>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Insertar Enlace</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label htmlFor="link-url" className="text-sm font-medium">
+                URL del enlace
+              </label>
+              <Input
+                id="link-url"
+                type="url"
+                placeholder="https://ejemplo.com"
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const selection = window.getSelection();
+                    if (linkUrl.trim()) {
+                      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+                        // Hay texto seleccionado, convertirlo en enlace
+                        const range = selection.getRangeAt(0);
+                        const link = document.createElement('a');
+                        link.href = linkUrl.trim();
+                        link.target = '_blank';
+                        link.rel = 'noopener noreferrer';
+                        link.appendChild(range.extractContents());
+                        range.insertNode(link);
+                        // Disparar evento input para guardar
+                        const activeElement = document.activeElement as HTMLElement;
+                        if (activeElement) {
+                          activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                      } else {
+                        // No hay selección, insertar URL como texto con enlace
+                        const link = document.createElement('a');
+                        link.href = linkUrl.trim();
+                        link.target = '_blank';
+                        link.rel = 'noopener noreferrer';
+                        link.textContent = linkUrl.trim();
+                        document.execCommand('insertHTML', false, link.outerHTML);
+                        // Disparar evento input para guardar
+                        const activeElement = document.activeElement as HTMLElement;
+                        if (activeElement) {
+                          activeElement.dispatchEvent(new Event('input', { bubbles: true }));
                         }
                       }
-                      setPopoverOpen(null);
-                    }}
-                    title={`Resaltado ${idx + 1}`}
-                  />
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
-        );
-      })()}
+                      setLinkUrl('');
+                      setLinkDialogOpen(false);
+                    }
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <UIButton
+                variant="outline"
+                onClick={() => {
+                  setLinkUrl('');
+                  setLinkDialogOpen(false);
+                }}
+              >
+                Cancelar
+              </UIButton>
+              <UIButton
+                onClick={() => {
+                  const selection = window.getSelection();
+                  if (linkUrl.trim()) {
+                    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+                      // Hay texto seleccionado, convertirlo en enlace
+                      const range = selection.getRangeAt(0);
+                      const link = document.createElement('a');
+                      link.href = linkUrl.trim();
+                      link.target = '_blank';
+                      link.rel = 'noopener noreferrer';
+                      link.appendChild(range.extractContents());
+                      range.insertNode(link);
+                      // Disparar evento input para guardar
+                      const activeElement = document.activeElement as HTMLElement;
+                      if (activeElement) {
+                        activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+                      }
+                    } else {
+                      // No hay selección, insertar URL como texto con enlace
+                      const link = document.createElement('a');
+                      link.href = linkUrl.trim();
+                      link.target = '_blank';
+                      link.rel = 'noopener noreferrer';
+                      link.textContent = linkUrl.trim();
+                      document.execCommand('insertHTML', false, link.outerHTML);
+                      // Disparar evento input para guardar
+                      const activeElement = document.activeElement as HTMLElement;
+                      if (activeElement) {
+                        activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+                      }
+                    }
+                    setLinkUrl('');
+                    setLinkDialogOpen(false);
+                  }
+                }}
+              >
+                Insertar
+              </UIButton>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
-      {/* Separador visual */}
-      <div className="w-px h-6 bg-white/30 mx-1" />
 
-      {/* 6. U subrayado (Underline) - Botón blanco con Popover de colores */}
+      {/* SUBRAYAR - Popover de colores */}
       <Popover open={popoverOpen === 'underlineColor'} onOpenChange={(open) => setPopoverOpen(open ? 'underlineColor' : null)}>
         <PopoverTrigger asChild>
-          <button
-            className={whiteButtonClassName}
-            title="Subrayado"
-            onMouseDown={(e) => e.preventDefault()}
-          >
+          <button className={whiteButtonClassName} onMouseDown={(e) => e.preventDefault()} title="Subrayar">
             <Underline className={iconClassName} />
           </button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-2 bg-white" onMouseDown={(e) => e.preventDefault()}>
-          <div className="text-xs text-gray-600 mb-2 px-1">Subrayado de</div>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-4 gap-1.5">
             {[
-              { value: '#14b8a6' }, // Teal
-              { value: '#f97316' }, // Orange-red
-              { value: '#84cc16' }, // Lime green
-              { value: '#eab308' }, // Yellow
-              { value: '#f59e0b' }, // Goldenrod
-              { value: '#3b82f6' }, // Bright blue
-              { value: '#1f2937' }, // Dark gray
-              { value: '#475569' }, // Slate blue
+              '#14b8a6',
+              '#f97316',
+              '#84cc16',
+              '#eab308',
+              '#f59e0b',
+              '#3b82f6',
+              '#6b9508',
+              '#5cc4c0',
+              '#e0d40e',
+              '#010974',
+              '#02d2d0',
+              '#95060c',
+              '#720abb',
+              '#ab6dd6',
+              '#f4f647',
+              '#016d77',
             ].map((color, idx) => (
+              <button key={idx} className="w-6 h-6 rounded border hover:scale-110" style={{ backgroundColor: color }} onMouseDown={(e) => applyColoredUnderline(e, color)} />
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      {/* DESTACADOR - Popover de colores pastel */}
+      <Popover
+        open={popoverOpen === 'highlight'}
+        onOpenChange={(open) => {
+          if (open) {
+            // Guardar selección actual antes de abrir los colores
+            const sel = window.getSelection();
+            if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+              highlightSelectionRef.current = sel.getRangeAt(0).cloneRange();
+            } else {
+              highlightSelectionRef.current = null;
+            }
+            setPopoverOpen('highlight');
+          } else {
+            setPopoverOpen(null);
+          }
+        }}
+      >
+        <PopoverTrigger asChild>
+          <button
+            className={whiteButtonClassName}
+            onMouseDown={(e) => e.preventDefault()}
+            title="Destacar"
+          >
+            <Highlighter className={iconClassName} />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-2 bg-white" onMouseDown={(e) => e.preventDefault()}>
+          <div className="grid grid-cols-4 gap-1.5">
+            {['#fef08a', '#fde68a', '#fed7aa', '#d1fae5', '#a5f3fc', '#e9d5ff', '#ddd6fe', '#c7d2fe'].map((color, idx) => (
               <button
                 key={idx}
-                className="w-8 h-8 rounded border border-gray-300 hover:scale-110 transition-transform"
-                style={{ backgroundColor: color.value }}
-                onMouseDown={(e) => applyColoredUnderline(e, color.value)}
-                title={`Color ${idx + 1}`}
+                className="w-6 h-6 rounded border hover:scale-110"
+                style={{ backgroundColor: color }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  // Restaurar selección guardada para que el resaltado funcione aunque se haya perdido el foco
+                  const sel = window.getSelection();
+                  if (highlightSelectionRef.current) {
+                    sel?.removeAllRanges();
+                    sel?.addRange(highlightSelectionRef.current);
+                  }
+                  if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+                    const range = sel.getRangeAt(0);
+                    const span = document.createElement('span');
+                    span.style.backgroundColor = color;
+                    try {
+                      span.appendChild(range.extractContents());
+                      range.insertNode(span);
+                      const activeElement = document.activeElement as HTMLElement;
+                      if (activeElement) activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+                    } catch (err) { console.error(err); }
+                  }
+                  setPopoverOpen(null);
+                }}
               />
             ))}
           </div>
         </PopoverContent>
       </Popover>
 
+      {/* PINCEL - Color de texto */}
+      <Popover open={popoverOpen === 'textColor'} onOpenChange={(open) => setPopoverOpen(open ? 'textColor' : null)}>
+        <PopoverTrigger asChild>
+          <button className={whiteButtonClassName} onMouseDown={(e) => e.preventDefault()} title="Color de texto">
+            <Paintbrush className={iconClassName} />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-2 bg-white" onMouseDown={(e) => e.preventDefault()}>
+          <div className="grid grid-cols-4 gap-1.5">
+            {['#14b8a6', '#f97316', '#84cc16', '#eab308', '#f59e0b', '#3b82f6', '#1f2937', '#475569'].map((color, idx) => (
+              <button key={idx} className="w-6 h-6 rounded border hover:scale-110" style={{ backgroundColor: color }} onMouseDown={(e) => applyTextColor(e, color)} />
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      {/* Separador */}
+      <div className="w-px h-5 bg-white/30 mx-0.5" />
+
       {/* 7. B (Bold) - Botón blanco */}
-      <button
-        className={whiteButtonClassName}
-        onMouseDown={(e) => handleFormat(e, 'bold')}
-        title="Negrita"
-      >
-        <Bold className={iconClassName} />
-      </button>
-
-      {/* 8. I (Italic) - Botón blanco */}
-      <button
-        className={whiteButtonClassName}
-        onMouseDown={(e) => handleFormat(e, 'italic')}
-        title="Cursiva"
-      >
-        <Italic className={iconClassName} />
-      </button>
-
-      {/* 9. S tachado (Strikethrough) - Botón blanco */}
-      <button
-        className={whiteButtonClassName}
-        onMouseDown={(e) => handleFormat(e, 'strikeThrough')}
-        title="Tachado"
-      >
-        <Strikethrough className={iconClassName} />
-      </button>
-
-      {/* Separador visual */}
-      <div className="w-px h-6 bg-white/30 mx-1" />
-
-      {/* 10-13. Alinear - Botón único con desplegable */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+      <Tooltip>
+        <TooltipTrigger asChild>
           <button
             className={whiteButtonClassName}
-            title="Alinear Texto"
+            onMouseDown={(e) => handleFormat(e, 'bold')}
           >
-            <AlignLeft className={iconClassName} />
-            <ChevronDown className="h-3 w-3 ml-0.5" />
+            <Bold className={iconClassName} />
           </button>
-        </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Negrita</p>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* 8. I (Italic) - Botón blanco */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={whiteButtonClassName}
+            onMouseDown={(e) => handleFormat(e, 'italic')}
+          >
+            <Italic className={iconClassName} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Cursiva</p>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* 9. S tachado (Strikethrough) - Botón blanco */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={whiteButtonClassName}
+            onMouseDown={(e) => handleFormat(e, 'strikeThrough')}
+          >
+            <Strikethrough className={iconClassName} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Tachado</p>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* Separador */}
+      <div className="w-px h-5 bg-white/30 mx-0.5" />
+
+      {/* 10-13. Alinear - Botón único con desplegable */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className={cn(whiteButtonClassName, "!px-1 !min-w-0")}
+              >
+                <AlignLeft className={iconClassName} />
+                <ChevronDown className="h-2.5 w-2.5" />
+              </button>
+            </DropdownMenuTrigger>
         <DropdownMenuContent>
-          <DropdownMenuItem onMouseDown={(e) => handleFormat(e, 'justifyLeft')}>
+          <DropdownMenuItem 
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleFormat(e, 'justifyLeft');
+            }}
+          >
             <AlignLeft className="h-4 w-4 mr-2" />
             Alinear Izquierda
           </DropdownMenuItem>
-          <DropdownMenuItem onMouseDown={(e) => handleFormat(e, 'justifyCenter')}>
+          <DropdownMenuItem 
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleFormat(e, 'justifyCenter');
+            }}
+          >
             <AlignCenter className="h-4 w-4 mr-2" />
             Centrar
           </DropdownMenuItem>
-          <DropdownMenuItem onMouseDown={(e) => handleFormat(e, 'justifyRight')}>
+          <DropdownMenuItem 
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleFormat(e, 'justifyRight');
+            }}
+          >
             <AlignRight className="h-4 w-4 mr-2" />
             Alinear Derecha
           </DropdownMenuItem>
-          <DropdownMenuItem onMouseDown={(e) => handleFormat(e, 'justifyFull')}>
+          <DropdownMenuItem 
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleFormat(e, 'justifyFull');
+            }}
+          >
             <AlignJustify className="h-4 w-4 mr-2" />
             Justificar
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Alinear Texto</p>
+        </TooltipContent>
+      </Tooltip>
 
-      {/* Separador visual */}
-      <div className="w-px h-6 bg-white/30 mx-1" />
+      {/* Separador */}
+      <div className="w-px h-5 bg-white/30 mx-0.5" />
 
       {/* 14. Calendario - Botón blanco */}
-      <button
-        className={whiteButtonClassName}
-        onClick={handleInsertDate}
-        title="Insertar Fecha"
-      >
-        <Calendar className={iconClassName} />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={whiteButtonClassName}
+            onMouseDown={handleInsertDate}
+          >
+            <Calendar className={iconClassName} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Insertar Fecha</p>
+        </TooltipContent>
+      </Tooltip>
 
-      {/* Separador visual */}
-      <div className="w-px h-6 bg-white/30 mx-1" />
 
       {/* 16. Borrador (Eraser) - Botón blanco */}
-      <button
-        className={whiteButtonClassName}
-        onMouseDown={clearFormatting}
-        title="Limpiar Formato"
-      >
-        <Eraser className={iconClassName} />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={whiteButtonClassName}
+            onMouseDown={clearFormatting}
+          >
+            <Eraser className={iconClassName} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Limpiar Formato</p>
+        </TooltipContent>
+      </Tooltip>
+
+      {/* Separador */}
+      <div className="w-px h-5 bg-white/30 mx-0.5" />
 
       {/* 12. Mover - Botón blanco (trasladado del menú principal) */}
-      <button
-        className={cn(whiteButtonClassName, isPanningActive && 'bg-gray-200')}
-        onClick={onPanToggle}
-        title="Mover"
-      >
-        <Move className={iconClassName} />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={cn(whiteButtonClassName, isPanningActive && 'bg-gray-200')}
+            onClick={onPanToggle}
+          >
+            <Move className={iconClassName} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Mover tablero</p>
+        </TooltipContent>
+      </Tooltip>
 
       {/* 13. Lienzo - Botón blanco (trasladado del menú principal) */}
-      <button
-        className={whiteButtonClassName}
-        onClick={handleAddLienzo}
-        title="Lienzo"
-      >
-        <RectangleHorizontal className={iconClassName} />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={whiteButtonClassName}
+            onClick={handleAddLienzo}
+          >
+            <RectangleHorizontal className={iconClassName} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Crear lienzo blanco</p>
+        </TooltipContent>
+      </Tooltip>
 
       {/* 14. X - Cuadrado gris oscuro */}
-      <button
-        className={darkSquareClassName}
-        onClick={onClose}
-        title="Cerrar"
-      >
-        <X className="w-[14px] h-[14px] text-white" />
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            className={darkSquareClassName}
+            onClick={onClose}
+          >
+            <X className="w-[14px] h-[14px] text-white" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Cerrar</p>
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 

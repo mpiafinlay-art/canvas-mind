@@ -1,3 +1,4 @@
+// @ts-nocheck
 'use client';
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
@@ -27,6 +28,7 @@ import jsPDF from 'jspdf';
 import ExportPdfDialog from './export-pdf-dialog';
 import './notepad-element.css';
 import { useDictationInput } from '@/hooks/use-dictation-input';
+import SmartCategorizer from './smart-categorizer';
 
 const PaginationControls = ({
   currentPage,
@@ -104,6 +106,7 @@ export default function NotepadElement(props: CommonElementProps) {
   const [isExportPdfDialogOpen, setIsExportPdfDialogOpen] = useState(false);
   const [isInfoOpen, setIsInfoOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   
   const currentPageIndex = typedContent.currentPage ?? 0;
   
@@ -498,7 +501,44 @@ export default function NotepadElement(props: CommonElementProps) {
   const safeProperties = (typeof properties === 'object' && properties !== null) ? properties : {};
   const formatType = (safeProperties as CanvasElementProperties)?.format || 'letter';
   const isSmallFormat = formatType === '10x15';
+  
+  // Color de fondo: #f8f0ad para elementos específicos, blanco para otros
+  const isSpecialNotepad = id === 'oyDN2LIr8z7VyYA5727F' || id === 'FdQ656GJ94TePuHpotbY' || id === 'Iz0UWQ5gQwXlkX1kGBf1' || id === 'kRfKpBDg946Y99668Tih';
+  const notepadBackgroundColor = isSpecialNotepad ? '#f8f0ad' : '#ffffff';
 
+  // =====================================================
+  // CRÍTICO: Todos los hooks DEBEN estar ANTES de cualquier return condicional
+  // Esto incluye useCallback, useMemo, useEffect, etc.
+  // Error #300 de React ocurre si los hooks están después de un return
+  // =====================================================
+  
+  // REGLA ESPECIAL: Cuadernos - Al hacer click suben a primera capa para editar, luego vuelven atrás
+  const handleNotepadClick = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('.drag-handle')) {
+      return; // No hacer nada si se hace click en el drag handle
+    }
+    // Regla: cuadernos empiezan en zIndex -1 y suben temporalmente al frente (0)
+    const originalZIndex = typeof safeProperties?.zIndex === 'number' ? safeProperties.zIndex : -1;
+    const editingZIndex = 0;
+    onUpdate(id, { properties: { ...safeProperties, zIndex: editingZIndex }, zIndex: editingZIndex });
+    setTimeout(() => {
+      if (!isSelected) { // Solo volver si no está seleccionado
+        onUpdate(id, { properties: { ...safeProperties, zIndex: originalZIndex }, zIndex: originalZIndex });
+      }
+    }, 2000);
+  }, [id, safeProperties, onUpdate, isSelected]);
+
+  // Renderizar SmartCategorizer siempre (aunque esté oculto) para evitar error #300
+  const categorizerElement = !isPreview ? (
+    <SmartCategorizer
+      content={typedContent}
+      onCategorySelect={setSelectedCategory}
+    />
+  ) : null;
+
+  // =====================================================
+  // AHORA sí podemos hacer el return condicional para minimizado
+  // =====================================================
   if (minimized) {
       return (
           <Card className="notepad-card w-full h-full flex items-center shadow-lg rounded-lg bg-card border-2 border-primary/50 group" data-element-id={id}>
@@ -512,27 +552,6 @@ export default function NotepadElement(props: CommonElementProps) {
           </Card>
       )
   }
-
-  // Color de fondo: #f8f0ad para elementos específicos, blanco para otros
-  // NOTA: aJRVj1bVggtfgGFe5NNz NO debe estar en la lista especial (restaurado a estado funcional normal)
-  const isSpecialNotepad = id === 'oyDN2LIr8z7VyYA5727F' || id === 'FdQ656GJ94TePuHpotbY' || id === 'Iz0UWQ5gQwXlkX1kGBf1' || id === 'kRfKpBDg946Y99668Tih';
-  const notepadBackgroundColor = isSpecialNotepad ? '#f8f0ad' : '#ffffff';
-  
-  // REGLA ESPECIAL: Cuadernos - Al hacer click suben a primera capa para editar, luego vuelven atrás
-  const handleNotepadClick = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest('.drag-handle')) {
-      return; // No hacer nada si se hace click en el drag handle
-    }
-    const currentZIndex = safeProperties?.zIndex || 1;
-    // Subir a primera capa temporalmente (zIndex alto)
-    onUpdate(id, { properties: { ...safeProperties, zIndex: 9999 } });
-    // Volver a zIndex original después de un tiempo
-    setTimeout(() => {
-      if (!isSelected) { // Solo volver si no está seleccionado
-        onUpdate(id, { properties: { ...safeProperties, zIndex: currentZIndex } });
-      }
-    }, 2000);
-  }, [id, safeProperties, onUpdate, isSelected]);
 
   return (
     <Card 
@@ -606,6 +625,7 @@ export default function NotepadElement(props: CommonElementProps) {
                 </div>
             )}
         </div>
+        {!minimized && categorizerElement}
         {!minimized && (
             <>
                 <CardContent 

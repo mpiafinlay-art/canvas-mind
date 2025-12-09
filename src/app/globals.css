@@ -85,8 +85,10 @@
   * {
     @apply border-border;
   }
-  body {
+  html, body {
     @apply text-foreground;
+    background-color: #96e4e6 !important;
+    min-height: 100vh;
     /* No aplicar bg-background para evitar flash de color azul */
     /* El color de fondo se aplica inline en cada componente */
   }

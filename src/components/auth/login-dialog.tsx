@@ -2,8 +2,7 @@
 
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
-import { signInWithEmail, createUserWithEmail } from '@/firebase/auth';
-import { useAuth } from '@/firebase/provider';
+import { signInWithEmail, createUserWithEmail } from '@/lib/auth';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 
@@ -18,25 +17,20 @@ export default function LoginDialog({ isOpen, onClose, onSuccess }: LoginDialogP
   const [password, setPassword] = useState('');
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const auth = useAuth();
   const { toast } = useToast();
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth) {
-      toast({ variant: 'destructive', title: 'Error', description: 'Firebase no está disponible' });
-      return;
-    }
 
     setIsLoading(true);
     try {
       if (isCreatingAccount) {
-        await createUserWithEmail(auth, email, password);
+        await createUserWithEmail(email, password);
         toast({ title: 'Cuenta creada', description: 'Tu cuenta ha sido creada exitosamente' });
       } else {
-        await signInWithEmail(auth, email, password);
+        await signInWithEmail(email, password);
         toast({ title: 'Sesión iniciada', description: 'Bienvenido de vuelta' });
       }
       setEmail('');

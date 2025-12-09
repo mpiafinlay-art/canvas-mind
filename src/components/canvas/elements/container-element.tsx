@@ -124,7 +124,7 @@ export default function ContainerElement(props: CommonElementProps & { unanchorE
         };
         
         onUpdate(elementId, {
-          parentId: undefined, // Usar undefined en lugar de null
+          parentId: null,
           hidden: false,
           properties: {
             ...(typeof releasedElement.properties === 'object' && releasedElement.properties !== null ? releasedElement.properties : {}),

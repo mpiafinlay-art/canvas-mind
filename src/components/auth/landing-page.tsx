@@ -1,24 +1,18 @@
 "use client";
 
 import React, { useState } from "react";
-import { useAuth } from "@/firebase/provider";
-import { signInWithGoogle, signInAsGuest } from "@/firebase/auth";
+import { signInWithGoogle, signInAsGuest } from "@/lib/auth";
 import { BrainCircuit, User, Loader2 } from "lucide-react";
 
 export function LandingPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const auth = useAuth();
 
   const handleGoogleLogin = async () => {
-    if (!auth) {
-      setError("Firebase no está disponible. Recarga la página.");
-      return;
-    }
     setIsLoading(true);
     setError(null);
     try {
-      await signInWithGoogle(auth);
+      await signInWithGoogle();
     } catch (err: unknown) {
       console.error("Error login Google:", err);
       setError("No se pudo conectar con Google. Revisa tu conexión.");
@@ -27,14 +21,10 @@ export function LandingPage() {
   };
 
   const handleGuestLogin = async () => {
-    if (!auth) {
-      setError("Firebase no está disponible. Recarga la página.");
-      return;
-    }
     setIsLoading(true);
     setError(null);
     try {
-      await signInAsGuest(auth);
+      await signInAsGuest();
     } catch (err: unknown) {
       console.error("Error login Invitado:", err);
       setError("Error al entrar como invitado.");

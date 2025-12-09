@@ -1,5 +1,5 @@
 
-import './globals.css';
+import '../styles/globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { Providers } from '@/components/providers';
 

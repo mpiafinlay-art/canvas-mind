@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { AlertCircle } from 'lucide-react';
 
@@ -11,6 +12,8 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const router = useRouter();
+  
   useEffect(() => {
     console.error('Error capturado:', error);
   }, [error]);
@@ -24,7 +27,7 @@ export default function Error({
       </p>
       <div className="flex gap-2">
         <Button onClick={reset}>Intentar de nuevo</Button>
-        <Button variant="outline" onClick={() => window.location.href = '/'}>
+        <Button variant="outline" onClick={() => router.push('/login')}>
           Volver al inicio
         </Button>
       </div>

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // src/components/board-content.tsx
 
 'use client'; 

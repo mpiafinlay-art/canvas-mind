@@ -37,6 +37,8 @@ export default function MoodboardElement(props: CommonElementProps) {
   const [isAddingImage, setIsAddingImage] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
   const [editingAnnotation, setEditingAnnotation] = useState<string | null>(null);
+  const [draggedImageId, setDraggedImageId] = useState<string | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -124,6 +126,53 @@ export default function MoodboardElement(props: CommonElementProps) {
     onUpdate(id, { content: updatedContent });
     setEditingAnnotation(null);
   }, [id, moodboardContent, onUpdate]);
+
+  // Drag and Drop handlers
+  const handleDragStart = useCallback((e: React.DragEvent, imageId: string) => {
+    setDraggedImageId(imageId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', imageId);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverIndex(index);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    setDragOverIndex(null);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (!draggedImageId) return;
+
+    const draggedIndex = moodboardContent.images.findIndex(img => img.id === draggedImageId);
+    if (draggedIndex === -1 || draggedIndex === dropIndex) {
+      setDraggedImageId(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    const newImages = [...moodboardContent.images];
+    const [removed] = newImages.splice(draggedIndex, 1);
+    newImages.splice(dropIndex, 0, removed);
+
+    const updatedContent: MoodboardContent = {
+      ...moodboardContent,
+      images: newImages,
+    };
+    onUpdate(id, { content: updatedContent });
+    
+    setDraggedImageId(null);
+    setDragOverIndex(null);
+  }, [draggedImageId, moodboardContent, id, onUpdate]);
+
+  const handleDragEnd = useCallback(() => {
+    setDraggedImageId(null);
+    setDragOverIndex(null);
+  }, []);
 
   // Cerrar moodboard
   const handleClose = useCallback(() => {
@@ -264,7 +313,7 @@ export default function MoodboardElement(props: CommonElementProps) {
           </div>
         )}
 
-        {/* Grid de imágenes */}
+        {/* Grid de imágenes con drag and drop */}
         {moodboardContent.images.length === 0 ? (
           <div className="flex items-center justify-center h-full text-sm text-gray-400">
             Haz clic en el botón de imagen para agregar imágenes al moodboard
@@ -274,13 +323,28 @@ export default function MoodboardElement(props: CommonElementProps) {
             "grid gap-4",
             layout === 'masonry' ? "grid-cols-2" : "grid-cols-2"
           )}>
-            {moodboardContent.images.map((image) => {
+            {moodboardContent.images.map((image, index) => {
               const imageAnnotations = moodboardContent.annotations.filter(ann => ann.imageId === image.id);
+              const isDragging = draggedImageId === image.id;
+              const isDragOver = dragOverIndex === index;
               
               return (
                 <div
                   key={image.id}
-                  className="relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50"
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, image.id)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, index)}
+                  onDragEnd={handleDragEnd}
+                  className={cn(
+                    "relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50 transition-all",
+                    isDragging && "opacity-50 cursor-grabbing",
+                    isDragOver && "ring-2 ring-blue-500 ring-offset-2 scale-105"
+                  )}
+                  style={{
+                    cursor: isDragging ? 'grabbing' : 'grab',
+                  }}
                 >
                   {/* Imagen */}
                   <div

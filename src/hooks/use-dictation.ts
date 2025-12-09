@@ -1,194 +1,116 @@
-/**
- * Hook de Dictado - Versión LIMPIA Y FINAL
- * - Preview gris en tiempo real
- * - Texto final negro al pausar
- * - Sin duplicación de palabras
- */
-
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
-interface UseDictationReturn {
+declare global {
+  interface Window {
+    SpeechRecognition: typeof SpeechRecognition;
+    webkitSpeechRecognition: typeof SpeechRecognition;
+  }
+}
+
+type UseDictationReturn = {
   isSupported: boolean;
   isListening: boolean;
-  transcript: string;
-  finalTranscript: string;
   interimTranscript: string;
-  permissionError: string | null;
-  start: () => Promise<void>;
+  finalTranscript: string;
+  toggle: () => void;
   stop: () => void;
-  toggle: () => Promise<void>;
-  resetTranscript: () => void;
-}
+};
 
 export const useDictation = (): UseDictationReturn => {
   const [isListening, setIsListening] = useState(false);
-  const [finalTranscript, setFinalTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
-  const [permissionError, setPermissionError] = useState<string | null>(null);
-  
+  const [finalTranscript, setFinalTranscript] = useState('');
+
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const finalTextRef = useRef<string>('');
-  const isActiveRef = useRef(false);
 
-  const isSupported = typeof window !== 'undefined' && 
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+  const isSupported =
+    typeof window !== 'undefined' &&
+    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      isActiveRef.current = false;
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop(); } catch {}
+  const stop = useCallback(() => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        /* no-op */
       }
-    };
+    }
+    setIsListening(false);
+    setInterimTranscript('');
   }, []);
 
-  const start = useCallback(async () => {
-    if (!isSupported) {
-      setPermissionError('Navegador no soporta dictado');
+  const toggle = useCallback(() => {
+    if (!isSupported) return;
+
+    if (isListening) {
+      stop();
       return;
     }
 
-    if (isActiveRef.current) return;
+    const SpeechRecognitionImpl =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionImpl) return;
 
-    // Limpiar instancia anterior
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
-    }
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    
+    const recognition = new SpeechRecognitionImpl();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'es-ES';
-    
-    recognitionRef.current = recognition;
-    isActiveRef.current = true;
-    
-    // Limpiar transcripts anteriores
-    finalTextRef.current = '';
-    setFinalTranscript('');
-    setInterimTranscript('');
 
     recognition.onstart = () => {
-      console.log('🎤 Dictado activo');
       setIsListening(true);
-      setPermissionError(null);
+      setInterimTranscript('');
+      setFinalTranscript('');
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = '';
-      
-      // Solo procesar desde el último resultado
+      let finalText = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0].transcript;
-        
         if (result.isFinal) {
-          // Texto confirmado - agregar al final
-          const formatted = text.trim();
-          if (formatted) {
-            finalTextRef.current += (finalTextRef.current ? ' ' : '') + formatted;
-            setFinalTranscript(finalTextRef.current);
-          }
-          setInterimTranscript(''); // Limpiar preview
+          finalText += text + ' ';
         } else {
-          // Preview en tiempo real
-          interim = text;
+          interim += text;
         }
       }
-      
-      // Mostrar preview (gris)
-      if (interim) {
-        setInterimTranscript(interim);
+      if (interim) setInterimTranscript(interim);
+      if (finalText) {
+        setInterimTranscript('');
+        setFinalTranscript((prev) => (prev + ' ' + finalText).trim());
       }
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error === 'not-allowed') {
-        setPermissionError('Permiso de micrófono denegado');
-        isActiveRef.current = false;
-        setIsListening(false);
-      }
-      // Ignorar no-speech y aborted
     };
 
     recognition.onend = () => {
-      if (isActiveRef.current) {
-        // Auto-reiniciar si sigue activo
-        setTimeout(() => {
-          if (isActiveRef.current && recognitionRef.current) {
-            try {
-              recognitionRef.current.start();
-            } catch {
-              isActiveRef.current = false;
-              setIsListening(false);
-            }
-          }
-        }, 500);
-      } else {
-        setIsListening(false);
-      }
+      setIsListening(false);
+      recognitionRef.current = null;
     };
 
-    try {
-      recognition.start();
-    } catch (error) {
-      setPermissionError('Error al iniciar micrófono');
-      isActiveRef.current = false;
-    }
-  }, [isSupported]);
-
-  const stop = useCallback(() => {
-    console.log('🎤 Deteniendo dictado');
-    isActiveRef.current = false;
-    
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch {}
+    recognition.onerror = () => {
+      setIsListening(false);
       recognitionRef.current = null;
-    }
-    
-    setIsListening(false);
-    
-    // Consolidar interim pendiente
-    const pending = interimTranscript.trim();
-    if (pending) {
-      finalTextRef.current += (finalTextRef.current ? ' ' : '') + pending;
-      setFinalTranscript(finalTextRef.current);
-      setInterimTranscript('');
-    }
-  }, [interimTranscript]);
+    };
 
-  const toggle = useCallback(async () => {
-    if (isListening) {
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [isListening, isSupported, stop]);
+
+  useEffect(() => {
+    return () => {
       stop();
-    } else {
-      await start();
-    }
-  }, [isListening, start, stop]);
-
-  const resetTranscript = useCallback(() => {
-    finalTextRef.current = '';
-    setFinalTranscript('');
-    setInterimTranscript('');
-  }, []);
-
-  // Transcript completo: final (negro) + interim (para preview gris)
-  const transcript = finalTranscript + (interimTranscript ? ' ' + interimTranscript : '');
+    };
+  }, [stop]);
 
   return {
     isSupported,
     isListening,
-    transcript,
-    finalTranscript,
     interimTranscript,
-    permissionError,
-    start,
-    stop,
+    finalTranscript,
     toggle,
-    resetTranscript,
+    stop,
   };
 };
+
+export default useDictation;

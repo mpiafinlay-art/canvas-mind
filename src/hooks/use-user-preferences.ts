@@ -1,13 +1,14 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useFirestore, useUser } from '@/firebase/provider';
+import { useAuthContext } from '@/context/AuthContext';
+import { getFirebaseFirestore } from '@/lib/firebase';
 import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import type { UserPreferences } from '@/lib/types';
 
 export function useUserPreferences() {
-  const firestore = useFirestore();
-  const { user } = useUser();
+  const firestore = getFirebaseFirestore();
+  const { user } = useAuthContext();
 
   const [micPermission, setMicPermission] = useState<UserPreferences['microphonePermission']>('prompt');
 

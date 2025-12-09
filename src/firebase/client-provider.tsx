@@ -13,7 +13,7 @@ import {
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
-import { firebaseConfig } from '@/firebase/config';
+import { firebaseConfig } from '@/lib/firebase';
 import { FirebaseContext, type FirebaseContextState } from '@/firebase/provider';
 import FirebaseErrorListener from '@/components/FirebaseErrorListener';
 

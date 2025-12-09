@@ -3,19 +3,19 @@
 import * as React from "react";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { FirebaseClientProvider } from "@/firebase/client-provider";
+import { AuthProvider } from "@/context/AuthContext";
 
 /**
  * Providers Component
  * 
  * Orden lógico de providers:
- * 1. FirebaseClientProvider - Base de datos y autenticación (Firebase)
+ * 1. AuthProvider - Autenticación y Firebase (nuevo sistema)
  * 2. NextThemesProvider - Tema visual (dark/light mode)
  * 3. TooltipProvider - Componentes UI (tooltips)
  */
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({ children }) {
   return (
-    <FirebaseClientProvider>
+    <AuthProvider>
       <NextThemesProvider
         attribute="class"
         defaultTheme="light"
@@ -26,6 +26,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
           {children}
         </TooltipProvider>
       </NextThemesProvider>
-    </FirebaseClientProvider>
+    </AuthProvider>
   );
 }

@@ -14,7 +14,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useFirestore, useUser } from "@/firebase/provider";
+import { useAuthContext } from "@/context/AuthContext";
+import { getFirebaseFirestore } from "@/lib/firebase";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 import { useToast } from "@/hooks/use-toast";
 import { errorEmitter } from "@/firebase/error-emitter";
@@ -28,8 +29,8 @@ type CreateBoardDialogProps = {
 export default function CreateBoardDialog({ isOpen, onOpenChange }: CreateBoardDialogProps) {
   const [boardName, setBoardName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
-  const firestore = useFirestore();
-  const { user } = useUser();
+  const firestore = getFirebaseFirestore();
+  const { user } = useAuthContext();
   const router = useRouter();
   const { toast } = useToast();
 

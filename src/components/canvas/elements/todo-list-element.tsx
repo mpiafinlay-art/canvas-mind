@@ -34,7 +34,6 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAutoSave } from '@/hooks/use-auto-save';
 import { SaveStatusIndicator } from '@/components/canvas/save-status-indicator';
-import { insertDictationTextToInput } from '@/lib/dictation-helper';
 
 // Colores disponibles para el fondo de la lista
 const COLOR_PALETTE = [
@@ -244,35 +243,6 @@ export default function TodoListElement(props: CommonElementProps) {
     onUpdate(id, { content: updatedContent });
     handleAutoSaveChange(); // Programar auto-save después de reordenar
   };
-
-  // Soporte para dictado: insertar texto cuando está escuchando y un input está enfocado
-  const dictationStateRef = useRef<{ lastInsertedText: string; lastFinalText: string }>({ lastInsertedText: '', lastFinalText: '' });
-  
-  useEffect(() => {
-    if (!isListening || !isSelected) {
-      // Resetear estado cuando se detiene el dictado
-      if (!isListening) {
-        dictationStateRef.current = { lastInsertedText: '', lastFinalText: '' };
-      }
-      return;
-    }
-
-    if (!finalTranscript && !interimTranscript) return;
-
-    const activeElement = document.activeElement;
-    if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-      const input = activeElement as HTMLInputElement | HTMLTextAreaElement;
-      // Verificar que el input pertenece a este elemento (está dentro del card)
-      if (cardRef.current && cardRef.current.contains(input)) {
-        insertDictationTextToInput(
-          input,
-          liveTranscript || '',
-          finalTranscript || '',
-          dictationStateRef.current
-        );
-      }
-    }
-  }, [isListening, liveTranscript, finalTranscript, interimTranscript, isSelected]);
 
   return (
     <Card
